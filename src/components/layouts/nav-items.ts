@@ -10,6 +10,7 @@ import {
   BarChart3,
   Settings,
   History,
+  FlaskConical,
   type LucideIcon,
 } from "lucide-react";
 
@@ -91,5 +92,10 @@ export const adminNavGroups: NavGroup[] = [
       { label: "Audit log", to: "/admin/settings/audit", icon: History },
       { label: "Settings", to: "/admin/settings", icon: Settings },
     ],
+  },
+  {
+    id: "dev",
+    label: "Dev",
+    items: [{ label: "Onboarding", to: "/onboarding", icon: FlaskConical }],
   },
 ];
