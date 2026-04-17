@@ -200,7 +200,7 @@ function SidebarSearch() {
       <SidebarInput
         type="search"
         placeholder="Search…"
-        className="h-8 pl-8 pr-12 text-xs"
+        className="h-8 border-0 pl-8 pr-12 text-xs shadow-none focus-visible:ring-0"
         aria-label="Search"
       />
       <kbd

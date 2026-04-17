@@ -1,9 +1,11 @@
-import { Bell, Moon, Search, Sun } from "lucide-react";
+import { Moon, Search, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+
+import { NotificationsPopover } from "./NotificationsPopover";
 
 type Theme = "light" | "dark";
 
@@ -67,19 +69,7 @@ export function AdminTopbar() {
 
       <div className="ml-auto flex items-center gap-1.5">
         {/* Notifications */}
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label="Notifications"
-          className="relative text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
-        >
-          <Bell className="h-[18px] w-[18px]" />
-          <span
-            aria-hidden="true"
-            className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[var(--primary)] ring-2 ring-[var(--background)]"
-          />
-        </Button>
+        <NotificationsPopover />
 
         {/* Theme toggle */}
         <Button
