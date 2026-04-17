@@ -1,0 +1,407 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Dark-mode variant bound to .dark class on <html>. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ==========================================================================
+   Design tokens — single source of truth.
+   ==========================================================================
+
+   Palette: orange + black + white + neutral gray. No warm stone, no
+   navy/slate/zinc. Tailwind `neutral` scale only for grays.
+*/
+
+:root {
+  /* Brand — copper orange. Used for primary actions, active nav states,
+     brand accents. Never for borders, body text, or background fills. */
+  --primary: #f27a1a;
+  --primary-hover: #e06a10;
+  --primary-light: #fba85c;
+  --primary-foreground: #ffffff;
+
+  /* Surfaces — neutral gray scale (Tailwind `neutral`). */
+  --background: #ffffff;
+  --surface: #fafafa;       /* neutral-50 — default Card fill */
+  --surface-2: #f5f5f5;     /* neutral-100 — inset/hover */
+  --surface-3: #e5e5e5;     /* neutral-200 — active/deep hover */
+
+  /* Borders — whisper for internal dividers; `-strong` for inputs + emphasis. */
+  --border: #ededed;        /* near-neutral-150 — internal dividers */
+  --border-strong: #d4d4d4; /* neutral-300 — visible on inputs, explicit dividers */
+  --input: #d4d4d4;
+  --ring: #f27a1a;          /* focus ring = orange */
+
+  /* Text */
+  --foreground: #171717;    /* neutral-900 — primary text */
+  --muted-foreground: #525252; /* neutral-600 — secondary text */
+  --subtle-foreground: #a3a3a3; /* neutral-400 — tertiary/meta */
+
+  /* Semantic */
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --warning: #eab308;
+  --warning-foreground: #171717;
+  --danger: #dc2626;
+  --danger-foreground: #ffffff;
+  --info: #0891b2;
+  --info-foreground: #ffffff;
+
+  /* Card / popover — card is lifted to neutral-50 so it reads as elevated
+     without needing a border. shadow-sm + bg shift does the work. */
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: #ffffff;
+  --popover-foreground: var(--foreground);
+  --muted: var(--surface-2);
+  --muted-foreground-token: var(--muted-foreground);
+  --muted-2: var(--surface-3);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--foreground);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--foreground);
+  --destructive: var(--danger);
+  --destructive-foreground: var(--danger-foreground);
+  --primary-foreground-token: var(--primary-foreground);
+
+  /* Radii — ProTouch reads confident/industrial. Not too rounded. */
+  --radius-sm: 0.375rem;  /* 6px */
+  --radius: 0.625rem;     /* 10px — default */
+  --radius-lg: 0.875rem;  /* 14px — cards */
+  --radius-xl: 1.25rem;   /* 20px — shell outer */
+  --radius-2xl: 1.75rem;  /* 28px — sidebar frame */
+
+  /* Shadows — neutral black, soft. */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.08), 0 1px 2px -1px rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
+  --shadow-lg: 0 12px 24px -8px rgb(0 0 0 / 0.12), 0 6px 10px -6px rgb(0 0 0 / 0.06);
+
+  /* Sidebar — ALWAYS black. Signature element. Orange = only accent color. */
+  --sidebar: #0a0a0a;              /* near-black, easier on eyes than pure #000 */
+  --sidebar-elevated: #1a1a1a;     /* neutral-900 — search input, inner cards */
+  --sidebar-foreground: #fafafa;   /* neutral-50 — primary text */
+  --sidebar-muted: #a3a3a3;        /* neutral-400 — inactive labels/icons */
+  --sidebar-subtle: #737373;       /* neutral-500 — tertiary meta */
+  --sidebar-border: #1a1a1a;       /* near-invisible separator (matches elevated) */
+  --sidebar-border-strong: #262626; /* neutral-800 — subtle visible divider */
+  --sidebar-active-bg: rgba(242, 122, 26, 0.14); /* orange tint behind active */
+  --sidebar-active-fg: #f27a1a;    /* orange — active label + icon */
+  --sidebar-hover-bg: #1a1a1a;     /* subtle hover, matches elevated */
+  --sidebar-kbd-bg: #1a1a1a;
+  --sidebar-kbd-fg: #a3a3a3;
+
+  /* Layout constants */
+  --sidebar-w-expanded: 16rem;   /* 256px */
+  --sidebar-w-collapsed: 4.5rem; /* 72px */
+  --topbar-h: 3.5rem;            /* 56px */
+  --shell-gap: 0.625rem;         /* gap between sidebar and content in shell */
+}
+
+.dark {
+  --primary: #f27a1a;
+  --primary-hover: #e06a10;
+  --primary-light: #fba85c;
+  --primary-foreground: #ffffff;
+
+  /* Pure neutral dim-black palette. No navy, no warmth. Orange is the only hue. */
+  --background: #0a0a0a;    /* neutral-950 — dim black */
+  --surface: #141414;       /* card fill, elevates over bg */
+  --surface-2: #1f1f1f;     /* inset panels, muted chips */
+  --surface-3: #2a2a2a;     /* active/hover on surface-2 */
+
+  --border: #1f1f1f;        /* near-invisible — matches surface-2 */
+  --border-strong: #333333; /* visible on inputs/explicit dividers */
+  --input: #333333;
+  --ring: #fba85c;          /* focus ring — light orange for dark-mode contrast */
+
+  --foreground: #fafafa;    /* neutral-50 — pure near-white */
+  --muted-foreground: #a3a3a3; /* neutral-400 */
+  --subtle-foreground: #737373; /* neutral-500 */
+
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --danger: #ef4444;
+  --info: #06b6d4;
+
+  --card: var(--surface);
+  --card-foreground: var(--foreground);
+  --popover: var(--surface);
+  --popover-foreground: var(--foreground);
+  --muted: var(--surface-2);
+  --muted-2: var(--surface-3);
+  --accent: var(--surface-2);
+  --accent-foreground: var(--foreground);
+  --secondary: var(--surface-2);
+  --secondary-foreground: var(--foreground);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+
+  /* Sidebar colors intentionally NOT overridden here — stays always-black.
+     Sidebar is #0a0a0a, same as dark-mode bg, so it merges seamlessly;
+     separation comes from the rounded shell gap, not a visible edge. */
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30);
+  --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.35), 0 1px 2px -1px rgb(0 0 0 / 0.25);
+  --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.35), 0 2px 4px -2px rgb(0 0 0 / 0.20);
+  --shadow-lg: 0 12px 28px -8px rgb(0 0 0 / 0.45), 0 6px 10px -6px rgb(0 0 0 / 0.25);
+}
+
+/* Expose tokens to Tailwind v4's utility engine. */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-light: var(--primary-light);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-muted: var(--sidebar-muted);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-active-bg: var(--sidebar-active-bg);
+  --color-sidebar-active-fg: var(--sidebar-active-fg);
+  --color-sidebar-hover-bg: var(--sidebar-hover-bg);
+
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Base element defaults */
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    -webkit-tap-highlight-color: transparent;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  /* Monospace load numbers, MC/DOT numbers, VINs */
+  .font-mono,
+  [data-mono] {
+    font-family: var(--font-mono);
+    font-feature-settings: "ss01", "tnum";
+  }
+}
+
+/* Custom keyframes — onboarding polish */
+@keyframes photo-progress {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+@keyframes onboarding-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@layer utilities {
+  .animate-onboarding-in {
+    animation: onboarding-fade-in 320ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Page-level staggered entrance for card grids and widget sections.
+     Apply `animate-enter` to each child; set `--enter-delay` per child
+     via style={{ '--enter-delay': '50ms' }} or Tailwind arbitrary. */
+  .animate-enter {
+    animation: enter-up 400ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: var(--enter-delay, 0ms);
+  }
+
+  /* Stagger helpers — use on children: class="animate-enter stagger-1" */
+  .stagger-1 { --enter-delay: 0ms; }
+  .stagger-2 { --enter-delay: 60ms; }
+  .stagger-3 { --enter-delay: 120ms; }
+  .stagger-4 { --enter-delay: 180ms; }
+  .stagger-5 { --enter-delay: 240ms; }
+  .stagger-6 { --enter-delay: 300ms; }
+}
+
+@keyframes enter-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Respect reduced motion but don't obliterate UX affordances. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Scrollbar polish — subtle, stone-toned */
+@layer utilities {
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border-strong);
+    border-radius: 9999px;
+  }
+
+  /* Fully hidden scrollbar — keeps overflow scrolling functional
+     (trackpad, swipe, keyboard) but removes all visual chrome. */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+}
+
+/* ==========================================================================
+   Native date / time / datetime-local inputs.
+   Browsers render their own spin buttons + calendar picker chrome that
+   ignores Tailwind utilities. These rules tame it so native inputs match
+   the rest of our form system in both light + dark themes.
+   ========================================================================== */
+@layer base {
+  input[type="date"]::-webkit-datetime-edit,
+  input[type="time"]::-webkit-datetime-edit,
+  input[type="datetime-local"]::-webkit-datetime-edit {
+    color: var(--foreground);
+    padding: 0;
+  }
+  input[type="date"]::-webkit-datetime-edit-fields-wrapper,
+  input[type="time"]::-webkit-datetime-edit-fields-wrapper,
+  input[type="datetime-local"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+  }
+  input[type="date"]::-webkit-datetime-edit-text,
+  input[type="time"]::-webkit-datetime-edit-text,
+  input[type="datetime-local"]::-webkit-datetime-edit-text {
+    color: var(--muted-foreground);
+    padding: 0 2px;
+  }
+  /* Empty / unset segments render in placeholder tone */
+  input[type="date"]:not(:focus):invalid::-webkit-datetime-edit-month-field,
+  input[type="date"]:not(:focus):invalid::-webkit-datetime-edit-day-field,
+  input[type="date"]:not(:focus):invalid::-webkit-datetime-edit-year-field,
+  input[type="time"]:not(:focus):invalid::-webkit-datetime-edit-hour-field,
+  input[type="time"]:not(:focus):invalid::-webkit-datetime-edit-minute-field,
+  input[type="datetime-local"]:not(:focus):invalid::-webkit-datetime-edit-month-field,
+  input[type="datetime-local"]:not(:focus):invalid::-webkit-datetime-edit-day-field,
+  input[type="datetime-local"]:not(:focus):invalid::-webkit-datetime-edit-year-field,
+  input[type="datetime-local"]:not(:focus):invalid::-webkit-datetime-edit-hour-field,
+  input[type="datetime-local"]:not(:focus):invalid::-webkit-datetime-edit-minute-field {
+    color: var(--subtle-foreground);
+  }
+  /* Active segment highlight — swap ugly browser blue for our primary */
+  input[type="date"]::-webkit-datetime-edit-month-field:focus,
+  input[type="date"]::-webkit-datetime-edit-day-field:focus,
+  input[type="date"]::-webkit-datetime-edit-year-field:focus,
+  input[type="time"]::-webkit-datetime-edit-hour-field:focus,
+  input[type="time"]::-webkit-datetime-edit-minute-field:focus,
+  input[type="datetime-local"]::-webkit-datetime-edit-month-field:focus,
+  input[type="datetime-local"]::-webkit-datetime-edit-day-field:focus,
+  input[type="datetime-local"]::-webkit-datetime-edit-year-field:focus,
+  input[type="datetime-local"]::-webkit-datetime-edit-hour-field:focus,
+  input[type="datetime-local"]::-webkit-datetime-edit-minute-field:focus {
+    background-color: color-mix(in oklab, var(--primary) 14%, transparent);
+    color: var(--foreground);
+    outline: none;
+    border-radius: 3px;
+  }
+  /* Calendar / clock picker icon */
+  input[type="date"]::-webkit-calendar-picker-indicator,
+  input[type="time"]::-webkit-calendar-picker-indicator,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    opacity: 0.55;
+    cursor: pointer;
+    padding: 2px;
+    border-radius: 4px;
+    transition: opacity 150ms ease, background-color 150ms ease;
+  }
+  input[type="date"]::-webkit-calendar-picker-indicator:hover,
+  input[type="time"]::-webkit-calendar-picker-indicator:hover,
+  input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+    background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+  }
+  .dark input[type="date"]::-webkit-calendar-picker-indicator,
+  .dark input[type="time"]::-webkit-calendar-picker-indicator,
+  .dark input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+    filter: invert(0.85);
+  }
+  /* Strip the weird inner spin buttons from number inputs */
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type="number"] {
+    -moz-appearance: textfield;
+  }
+}

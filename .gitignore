@@ -1,0 +1,25 @@
+node_modules
+dist
+dist-ssr
+.vite
+.env
+.env.local
+.env.*.local
+*.log
+.DS_Store
+.vercel
+.turbo
+.cache
+
+# TanStack Router generated
+src/routeTree.gen.ts
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
