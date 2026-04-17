@@ -1,6 +1,7 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { toast } from "@/lib/toast";
+import { toCsv, downloadCsv } from "@/lib/csv";
 import {
-  ArrowUpDown,
   Columns3,
   Download,
   List,
@@ -17,6 +18,7 @@ import { ViewSwitcher } from "@/components/common/ViewSwitcher";
 import { FilterChips } from "@/components/data/FilterChips";
 import { Pagination } from "@/components/data/Pagination";
 import { SearchInput } from "@/components/data/SearchInput";
+import { SortButton } from "@/components/data/SortButton";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
@@ -178,13 +180,45 @@ function LoadsListPage() {
         description="All loads. Filter by status, broker, or search by load, reference, or city."
         actions={
           <>
-            <Button variant="outline" size="md">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => {
+                const csv = toCsv(
+                  filtered.map((l) => ({
+                    load_number: l.loadNumber,
+                    status: l.status,
+                    broker: l.broker.companyName,
+                    pickup: `${l.pickup.city}, ${l.pickup.state}`,
+                    delivery: `${l.delivery.city}, ${l.delivery.state}`,
+                    driver: l.driver
+                      ? `${l.driver.firstName} ${l.driver.lastName}`
+                      : "",
+                    truck: l.truck?.unitNumber ?? "",
+                    rate_cents: l.rateCents,
+                    miles: l.miles ?? "",
+                    reference: l.referenceNumber ?? "",
+                  })),
+                );
+                if (!csv) {
+                  toast.info("Nothing to export with current filters");
+                  return;
+                }
+                downloadCsv(
+                  `loads-${new Date().toISOString().slice(0, 10)}`,
+                  csv,
+                );
+                toast.success(`Exported ${filtered.length} loads`);
+              }}
+            >
               <Download className="size-4" />
               Export CSV
             </Button>
-            <Button variant="primary" size="md">
-              <Plus className="size-4" />
-              New load
+            <Button asChild variant="primary" size="md">
+              <Link to="/admin/loads/new">
+                <Plus className="size-4" />
+                New load
+              </Link>
             </Button>
           </>
         }
@@ -291,18 +325,13 @@ function LoadsListPage() {
 }
 
 function LoadsTable({ rows }: { rows: FixtureLoad[] }) {
+  const navigate = useNavigate();
   return (
     <Table>
       <TableHeader>
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableHead>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              Load
-              <ArrowUpDown className="size-3" aria-hidden />
-            </button>
+            <SortButton>Load</SortButton>
           </TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Lane</TableHead>
@@ -315,7 +344,16 @@ function LoadsTable({ rows }: { rows: FixtureLoad[] }) {
       </TableHeader>
       <TableBody>
         {rows.map((l) => (
-          <TableRow key={l.id} className="cursor-pointer">
+          <TableRow
+            key={l.id}
+            className="cursor-pointer"
+            onClick={() =>
+              navigate({
+                to: "/admin/loads/$loadId",
+                params: { loadId: l.id },
+              })
+            }
+          >
             <TableCell>
               <div className="flex flex-col">
                 <Link

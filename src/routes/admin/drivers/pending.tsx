@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { toast } from "@/lib/toast";
 
 export const Route = createFileRoute("/admin/drivers/pending")({
   component: PendingApprovalsPage,
@@ -116,6 +117,13 @@ function PendingApprovalsPage() {
                   variant="outline"
                   size="md"
                   className="w-full sm:w-auto"
+                  onClick={() => {
+                    const reason = window.prompt(
+                      `Reject ${d.firstName} ${d.lastName}'s submission? Enter a reason the driver will see:`,
+                    );
+                    if (!reason) return;
+                    toast.error(`${d.firstName} ${d.lastName} rejected`);
+                  }}
                 >
                   <X className="size-4" />
                   <span>Reject</span>
@@ -124,6 +132,11 @@ function PendingApprovalsPage() {
                   variant="primary"
                   size="md"
                   className="w-full sm:w-auto"
+                  onClick={() => {
+                    toast.success(
+                      `${d.firstName} ${d.lastName} approved — email sent`,
+                    );
+                  }}
                 >
                   <Check className="size-4" />
                   <span>Approve</span>

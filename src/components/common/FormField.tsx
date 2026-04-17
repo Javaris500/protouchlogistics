@@ -81,7 +81,7 @@ export function FormField({
       <div className="flex items-baseline justify-between gap-2">
         <Label
           htmlFor={fieldId}
-          className="text-xs font-semibold text-[var(--foreground)]"
+          className="text-[13px] font-medium text-[var(--foreground)]"
         >
           {label}
           {required && (

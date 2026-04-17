@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
+import { toast } from "@/lib/toast";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -87,10 +88,18 @@ function NotificationsPage() {
         description="Everything that needs your attention, in one place."
         actions={
           <>
-            <Button variant="outline" size="md">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => toast.info("Filter panel — coming soon")}
+            >
               <Filter className="size-4" /> Filter
             </Button>
-            <Button variant="outline" size="md">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => toast.success("All notifications marked read")}
+            >
               <CheckCheck className="size-4" /> Mark all read
             </Button>
           </>

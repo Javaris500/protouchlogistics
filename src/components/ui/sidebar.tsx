@@ -64,7 +64,9 @@ const SidebarProvider = React.forwardRef<
     },
     ref,
   ) => {
-    const isMobile = !useMediaQuery("(min-width: 1024px)");
+    // Sidebar appears at `md` (768px) and up — tablet + desktop get the
+    // sidebar; only phone-sized viewports fall back to the BottomTabBar.
+    const isMobile = !useMediaQuery("(min-width: 768px)");
     const [openMobile, setOpenMobile] = React.useState(false);
 
     const [_open, _setOpen] = React.useState(defaultOpen);
@@ -218,7 +220,7 @@ const Sidebar = React.forwardRef<
     return (
       <div
         ref={ref}
-        className="group peer hidden lg:block text-[var(--sidebar-foreground)]"
+        className="group peer hidden md:block text-[var(--sidebar-foreground)]"
         data-state={state}
         data-collapsible={state === "collapsed" ? collapsible : ""}
         data-variant={variant}
@@ -237,7 +239,7 @@ const Sidebar = React.forwardRef<
         />
         <div
           className={cn(
-            "duration-200 fixed inset-y-0 z-10 hidden h-dvh w-[var(--sidebar-width)] transition-[left,right,width] ease-linear lg:flex",
+            "duration-200 fixed inset-y-0 z-10 hidden h-dvh w-[var(--sidebar-width)] transition-[left,right,width] ease-linear md:flex",
             side === "left"
               ? "left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]"
               : "right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]",
@@ -305,7 +307,7 @@ const SidebarRail = React.forwardRef<
       className={cn(
         "absolute inset-y-0 z-20 hidden w-4 -translate-x-1/2 transition-all ease-linear",
         "after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-[var(--sidebar-border)]",
-        "group-data-[side=left]:-right-4 group-data-[side=right]:left-0 lg:flex",
+        "group-data-[side=left]:-right-4 group-data-[side=right]:left-0 md:flex",
         "[[data-side=left][data-collapsible=offcanvas]_&]:-right-2",
         "[[data-side=right][data-collapsible=offcanvas]_&]:-left-2",
         className,
@@ -325,7 +327,7 @@ const SidebarInset = React.forwardRef<
     className={cn(
       "relative flex min-h-dvh flex-1 flex-col bg-[var(--background)]",
       "peer-data-[variant=inset]:min-h-[calc(100dvh-1rem)]",
-      "lg:peer-data-[variant=inset]:m-2 lg:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 lg:peer-data-[variant=inset]:ml-0 lg:peer-data-[variant=inset]:rounded-[var(--radius-2xl)] lg:peer-data-[variant=inset]:border lg:peer-data-[variant=inset]:border-[var(--border)] lg:peer-data-[variant=inset]:shadow-[var(--shadow-sm)]",
+      "md:peer-data-[variant=inset]:m-2 md:peer-data-[state=collapsed]:peer-data-[variant=inset]:ml-2 md:peer-data-[variant=inset]:ml-0 md:peer-data-[variant=inset]:rounded-[var(--radius-2xl)] md:peer-data-[variant=inset]:border md:peer-data-[variant=inset]:border-[var(--border)] md:peer-data-[variant=inset]:shadow-[var(--shadow-sm)]",
       className,
     )}
     {...props}

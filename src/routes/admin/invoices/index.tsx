@@ -1,6 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
+import { toast } from "@/lib/toast";
+import { toCsv, downloadCsv } from "@/lib/csv";
 import {
-  ArrowUpDown,
   Clock,
   DollarSign,
   Download,
@@ -11,6 +12,7 @@ import {
   Send,
 } from "lucide-react";
 import { useMemo, useState } from "react";
+import { cn } from "@/lib/utils";
 
 import { EmptyState } from "@/components/common/EmptyState";
 import { KpiCard } from "@/components/common/KpiCard";
@@ -18,6 +20,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { FilterChips } from "@/components/data/FilterChips";
 import { Pagination } from "@/components/data/Pagination";
 import { SearchInput } from "@/components/data/SearchInput";
+import { SortButton } from "@/components/data/SortButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -40,12 +43,31 @@ export const Route = createFileRoute("/admin/invoices/")({
 
 type StatusFilter = "all" | "draft" | "sent" | "paid" | "overdue" | "void";
 
+type SortKey = "invoice" | "total" | "issued" | "due";
+type SortDir = "asc" | "desc";
+
 const PAGE_SIZE = 10;
 
 function InvoicesListPage() {
   const [status, setStatus] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  // Default: most recently issued first
+  const [sort, setSort] = useState<{ key: SortKey; dir: SortDir }>({
+    key: "issued",
+    dir: "desc",
+  });
+
+  const toggleSort = (key: SortKey) => {
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === "asc" ? "desc" : "asc" }
+        : // New column: newest-first default for dates, high-to-low for money,
+          // a-z for strings. Invoice # is treated as a string.
+          { key, dir: key === "invoice" ? "asc" : "desc" },
+    );
+    setPage(1);
+  };
 
   const counts = useMemo(() => {
     const c = (s: InvoiceStatus) =>
@@ -87,7 +109,31 @@ function InvoicesListPage() {
     });
   }, [status, search]);
 
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sorted = useMemo(() => {
+    const arr = [...filtered];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      switch (sort.key) {
+        case "invoice":
+          cmp = a.invoiceNumber.localeCompare(b.invoiceNumber);
+          break;
+        case "total":
+          cmp = a.totalCents - b.totalCents;
+          break;
+        case "issued":
+          // ISO dates (YYYY-MM-DD) sort lexically
+          cmp = a.issueDate.localeCompare(b.issueDate);
+          break;
+        case "due":
+          cmp = a.dueDate.localeCompare(b.dueDate);
+          break;
+      }
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
+    return arr;
+  }, [filtered, sort]);
+
+  const pageRows = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-5">
@@ -98,13 +144,42 @@ function InvoicesListPage() {
           description="Generate, send, and reconcile broker invoices."
           actions={
             <>
-              <Button variant="outline" size="md">
+              <Button
+                variant="outline"
+                size="md"
+                onClick={() => {
+                  const csv = toCsv(
+                    sorted.map((i) => ({
+                      invoice_number: i.invoiceNumber,
+                      status: i.status,
+                      broker: i.broker.companyName,
+                      loads: i.loadCount,
+                      total_cents: i.totalCents,
+                      issue_date: i.issueDate,
+                      due_date: i.dueDate,
+                      paid_at: i.paidAt ?? "",
+                      payment_method: i.paymentMethod ?? "",
+                    })),
+                  );
+                  if (!csv) {
+                    toast.info("Nothing to export with current filters");
+                    return;
+                  }
+                  downloadCsv(
+                    `invoices-${new Date().toISOString().slice(0, 10)}`,
+                    csv,
+                  );
+                  toast.success(`Exported ${sorted.length} invoices`);
+                }}
+              >
                 <Download className="size-4" />
                 Export
               </Button>
-              <Button variant="primary" size="md">
-                <Plus className="size-4" />
-                New invoice
+              <Button asChild variant="primary" size="md">
+                <Link to="/admin/invoices/new">
+                  <Plus className="size-4" />
+                  New invoice
+                </Link>
               </Button>
             </>
           }
@@ -179,21 +254,27 @@ function InvoicesListPage() {
               title="No invoices match these filters"
               description="Adjust the filters above or create a new invoice from completed loads."
               action={
-                <Button variant="primary" size="sm">
-                  <Plus className="size-4" />
-                  New invoice
+                <Button asChild variant="primary" size="sm">
+                  <Link to="/admin/invoices/new">
+                    <Plus className="size-4" />
+                    New invoice
+                  </Link>
                 </Button>
               }
             />
           </div>
         ) : (
           <>
-            <InvoicesTable rows={pageRows} />
+            <InvoicesTable
+              rows={pageRows}
+              sort={sort}
+              onToggleSort={toggleSort}
+            />
             <div className="border-t border-border p-3">
               <Pagination
                 page={page}
                 pageSize={PAGE_SIZE}
-                total={filtered.length}
+                total={sorted.length}
                 onPageChange={setPage}
               />
             </div>
@@ -204,26 +285,59 @@ function InvoicesListPage() {
   );
 }
 
-function InvoicesTable({ rows }: { rows: FixtureInvoice[] }) {
+function InvoicesTable({
+  rows,
+  sort,
+  onToggleSort,
+}: {
+  rows: FixtureInvoice[];
+  sort: { key: SortKey; dir: SortDir };
+  onToggleSort: (key: SortKey) => void;
+}) {
+  const navigate = useNavigate();
   return (
     <Table>
       <TableHeader>
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableHead>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            <SortButton
+              active={sort.key === "invoice"}
+              direction={sort.key === "invoice" ? sort.dir : null}
+              onToggle={() => onToggleSort("invoice")}
             >
               Invoice
-              <ArrowUpDown className="size-3" aria-hidden />
-            </button>
+            </SortButton>
           </TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Broker</TableHead>
           <TableHead>Loads</TableHead>
-          <TableHead className="text-right">Total</TableHead>
-          <TableHead>Issued</TableHead>
-          <TableHead>Due</TableHead>
+          <TableHead className="text-right">
+            <SortButton
+              active={sort.key === "total"}
+              direction={sort.key === "total" ? sort.dir : null}
+              onToggle={() => onToggleSort("total")}
+            >
+              Total
+            </SortButton>
+          </TableHead>
+          <TableHead>
+            <SortButton
+              active={sort.key === "issued"}
+              direction={sort.key === "issued" ? sort.dir : null}
+              onToggle={() => onToggleSort("issued")}
+            >
+              Issued
+            </SortButton>
+          </TableHead>
+          <TableHead>
+            <SortButton
+              active={sort.key === "due"}
+              direction={sort.key === "due" ? sort.dir : null}
+              onToggle={() => onToggleSort("due")}
+            >
+              Due
+            </SortButton>
+          </TableHead>
           <TableHead>Payment</TableHead>
         </TableRow>
       </TableHeader>
@@ -231,7 +345,16 @@ function InvoicesTable({ rows }: { rows: FixtureInvoice[] }) {
         {rows.map((inv) => {
           const dueDays = daysUntil(inv.dueDate);
           return (
-            <TableRow key={inv.id} className="cursor-pointer">
+            <TableRow
+              key={inv.id}
+              className="cursor-pointer"
+              onClick={() =>
+                navigate({
+                  to: "/admin/invoices/$invoiceId",
+                  params: { invoiceId: inv.id },
+                })
+              }
+            >
               <TableCell>
                 <span className="font-mono text-sm font-semibold">
                   {inv.invoiceNumber}
@@ -280,12 +403,22 @@ function InvoicesTable({ rows }: { rows: FixtureInvoice[] }) {
                     </span>
                   </div>
                 ) : inv.status === "sent" || inv.status === "overdue" ? (
-                  <Button variant="ghost" size="sm" className="h-7 text-xs">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Send className="size-3" />
                     Resend
                   </Button>
                 ) : inv.status === "draft" ? (
-                  <Button variant="ghost" size="sm" className="h-7 text-xs">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <Mail className="size-3" />
                     Send
                   </Button>

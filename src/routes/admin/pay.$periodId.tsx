@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "@/lib/toast";
+import { toCsv, downloadCsv } from "@/lib/csv";
 
 export const Route = createFileRoute("/admin/pay/$periodId")({
   component: PayPeriodDetailPage,
@@ -42,13 +44,39 @@ function PayPeriodDetailPage() {
         description={`${period.driverCount} drivers · ${period.loadCount} loads · $${(period.totalCents / 100).toLocaleString()} total`}
         actions={
           <>
-            <Button variant="outline" size="md">
+            <Button
+              variant="outline"
+              size="md"
+              onClick={() => {
+                const csv = toCsv([
+                  {
+                    period_id: period.id,
+                    label: period.label,
+                    status: period.status,
+                    drivers: period.driverCount,
+                    loads: period.loadCount,
+                    total_cents: period.totalCents,
+                  },
+                ]);
+                downloadCsv(`pay-${period.id}`, csv);
+                toast.success(`Exported pay period ${period.id}`);
+              }}
+            >
               <Download className="size-4" /> Export CSV
             </Button>
             <Button
               variant="primary"
               size="md"
               disabled={period.status !== "open"}
+              onClick={() => {
+                if (
+                  window.confirm(
+                    `Settle ${period.label}? All ${period.driverCount} drivers will be marked paid for this period.`,
+                  )
+                ) {
+                  toast.success(`${period.label} settled`);
+                }
+              }}
             >
               <Wallet className="size-4" /> Settle period
             </Button>

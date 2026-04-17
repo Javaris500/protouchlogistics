@@ -77,19 +77,20 @@
   --shadow-md: 0 4px 10px -2px rgb(0 0 0 / 0.08), 0 2px 4px -2px rgb(0 0 0 / 0.04);
   --shadow-lg: 0 12px 24px -8px rgb(0 0 0 / 0.12), 0 6px 10px -6px rgb(0 0 0 / 0.06);
 
-  /* Sidebar — ALWAYS black. Signature element. Orange = only accent color. */
-  --sidebar: #0a0a0a;              /* near-black, easier on eyes than pure #000 */
-  --sidebar-elevated: #1a1a1a;     /* neutral-900 — search input, inner cards */
-  --sidebar-foreground: #fafafa;   /* neutral-50 — primary text */
-  --sidebar-muted: #a3a3a3;        /* neutral-400 — inactive labels/icons */
-  --sidebar-subtle: #737373;       /* neutral-500 — tertiary meta */
-  --sidebar-border: #1a1a1a;       /* near-invisible separator (matches elevated) */
-  --sidebar-border-strong: #262626; /* neutral-800 — subtle visible divider */
-  --sidebar-active-bg: rgba(242, 122, 26, 0.14); /* orange tint behind active */
+  /* Sidebar — LIGHT in light mode, overridden to dark in `.dark` below.
+     Orange remains the sole accent in both themes. */
+  --sidebar: #ffffff;              /* pure white panel */
+  --sidebar-elevated: #f3f4f6;     /* gray-100 — search input, inner cards */
+  --sidebar-foreground: #111827;   /* gray-900 — primary text */
+  --sidebar-muted: #6b7280;        /* gray-500 — inactive labels/icons */
+  --sidebar-subtle: #9ca3af;       /* gray-400 — tertiary meta */
+  --sidebar-border: #f3f4f6;       /* gray-100 — near-invisible separator */
+  --sidebar-border-strong: #e5e7eb; /* gray-200 — subtle visible divider */
+  --sidebar-active-bg: rgba(242, 122, 26, 0.12); /* orange tint behind active */
   --sidebar-active-fg: #f27a1a;    /* orange — active label + icon */
-  --sidebar-hover-bg: #1a1a1a;     /* subtle hover, matches elevated */
-  --sidebar-kbd-bg: #1a1a1a;
-  --sidebar-kbd-fg: #a3a3a3;
+  --sidebar-hover-bg: #f9fafb;     /* gray-50 — very subtle hover */
+  --sidebar-kbd-bg: #f3f4f6;
+  --sidebar-kbd-fg: #6b7280;
 
   /* Layout constants */
   --sidebar-w-expanded: 16rem;   /* 256px */
@@ -137,9 +138,22 @@
   --destructive: var(--danger);
   --destructive-foreground: #ffffff;
 
-  /* Sidebar colors intentionally NOT overridden here — stays always-black.
-     Sidebar is #0a0a0a, same as dark-mode bg, so it merges seamlessly;
-     separation comes from the rounded shell gap, not a visible edge. */
+  /* Sidebar — restore the dark palette. Light mode got white/light tokens in
+     :root; .dark returns it to the signature near-black panel so dark mode
+     stays cohesive (sidebar merges with dark-mode bg, separation comes from
+     the rounded shell gap rather than a visible edge). */
+  --sidebar: #0a0a0a;
+  --sidebar-elevated: #1a1a1a;
+  --sidebar-foreground: #fafafa;
+  --sidebar-muted: #a3a3a3;
+  --sidebar-subtle: #737373;
+  --sidebar-border: #1a1a1a;
+  --sidebar-border-strong: #262626;
+  --sidebar-active-bg: rgba(242, 122, 26, 0.14);
+  --sidebar-active-fg: #f27a1a;
+  --sidebar-hover-bg: #1a1a1a;
+  --sidebar-kbd-bg: #1a1a1a;
+  --sidebar-kbd-fg: #a3a3a3;
 
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.30);
   --shadow: 0 1px 3px 0 rgb(0 0 0 / 0.35), 0 1px 2px -1px rgb(0 0 0 / 0.25);
@@ -222,6 +236,30 @@
     background-color: var(--background);
     color: var(--foreground);
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+  /* ---------------------------------------------------------------
+     Focus outlines.
+
+     PROBLEM: the previous rule applied a 2px outline to *every* element
+     on :focus-visible, which in some browsers (notably Safari + some
+     Chromium versions) also paints a dark UA default outline on plain
+     :focus from a mouse click. Radix popover/dropdown/dialog triggers
+     are especially prone to this because they manage focus internally.
+     Result: ugly dark border flashes around things on mouse click.
+
+     FIX:
+       1. Reset browser default :focus outline — our components all
+          supply their own ring styles (ring-2, focus shadow, etc.).
+       2. Keep a safety-net :focus-visible ring in --ring (orange)
+          ONLY for bare interactive elements that didn't get a ring
+          utility. Keyboard users still see a clear focus indicator.
+
+     If you ever see a black/dark outline flash on a component, it
+     means that component is using :focus instead of :focus-visible
+     somewhere, OR it lacks any focus styling so this fallback kicks in.
+     --------------------------------------------------------------- */
+  :focus {
+    outline: none;
   }
   :focus-visible {
     outline: 2px solid var(--ring);

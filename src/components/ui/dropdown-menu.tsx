@@ -56,7 +56,7 @@ function DropdownMenuSub({
 
 function DropdownMenuContent({
   className,
-  sideOffset = 6,
+  sideOffset = 8,
   ...props
 }: React.ComponentProps<typeof DropdownMenuPrimitive.Content>) {
   return (
@@ -65,9 +65,9 @@ function DropdownMenuContent({
         data-slot="dropdown-menu-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 min-w-[10rem] overflow-hidden rounded-[var(--radius-md)]",
+          "z-50 min-w-[11rem] overflow-hidden rounded-[var(--radius-md)]",
           "border border-[var(--border)] bg-[var(--popover)] text-[var(--popover-foreground)]",
-          "shadow-[var(--shadow-md)] p-1",
+          "shadow-[var(--shadow-lg)] p-1.5",
           "max-h-[var(--radix-dropdown-menu-content-available-height)]",
           "origin-[var(--radix-dropdown-menu-content-transform-origin)]",
           "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95",
@@ -97,8 +97,8 @@ function DropdownMenuItem({
       data-inset={inset}
       data-variant={variant}
       className={cn(
-        "relative flex cursor-default select-none items-center gap-2 rounded-[var(--radius-sm)]",
-        "px-2 py-1.5 text-sm outline-hidden transition-colors",
+        "relative flex cursor-pointer select-none items-center gap-2.5 rounded-[var(--radius-sm)]",
+        "px-2.5 py-2 text-[13px] font-medium outline-hidden transition-colors",
         "focus:bg-[var(--accent)] focus:text-[var(--accent-foreground)]",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
         inset && "pl-8",

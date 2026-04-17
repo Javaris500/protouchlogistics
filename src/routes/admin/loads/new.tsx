@@ -1,32 +1,738 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { Package } from "lucide-react";
+import * as React from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+  ArrowRight,
+  Building2,
+  Loader2,
+  MapPin,
+  Package,
+  Truck,
+  UserRound,
+} from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
+import { FormField } from "@/components/common/FormField";
 import { PageHeader } from "@/components/common/PageHeader";
-import { PagePlaceholder } from "@/components/common/PagePlaceholder";
+import { Section } from "@/components/common/Section";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
+import { FIXTURE_DRIVERS } from "@/lib/fixtures/drivers";
+import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
+import { FIXTURE_TRUCKS } from "@/lib/fixtures/trucks";
+import { US_STATES } from "@/lib/onboarding/us-states";
 
 export const Route = createFileRoute("/admin/loads/new")({
   component: NewLoadPage,
 });
 
+/* -------------------------------------------------------------------------- */
+/*  Form shape                                                                */
+/* -------------------------------------------------------------------------- */
+
+interface StopDraft {
+  companyName: string;
+  line1: string;
+  city: string;
+  state: string;
+  zip: string;
+  windowStart: string;
+  windowEnd: string;
+  contactName: string;
+  contactPhone: string;
+  notes: string;
+}
+
+interface LoadDraft {
+  brokerId: string;
+  referenceNumber: string;
+  bolNumber: string;
+  commodity: string;
+  weight: string;
+  pieces: string;
+  rateDollars: string;
+  miles: string;
+  specialInstructions: string;
+  assignedDriverId: string;
+  assignedTruckId: string;
+  pickup: StopDraft;
+  delivery: StopDraft;
+}
+
+const EMPTY_STOP: StopDraft = {
+  companyName: "",
+  line1: "",
+  city: "",
+  state: "",
+  zip: "",
+  windowStart: "",
+  windowEnd: "",
+  contactName: "",
+  contactPhone: "",
+  notes: "",
+};
+
+const INITIAL: LoadDraft = {
+  brokerId: "",
+  referenceNumber: "",
+  bolNumber: "",
+  commodity: "",
+  weight: "",
+  pieces: "",
+  rateDollars: "",
+  miles: "",
+  specialInstructions: "",
+  assignedDriverId: "",
+  assignedTruckId: "",
+  pickup: { ...EMPTY_STOP },
+  delivery: { ...EMPTY_STOP },
+};
+
+type Errors = Partial<
+  Record<
+    | "brokerId"
+    | "commodity"
+    | "rateDollars"
+    | "miles"
+    | "pickup.line1"
+    | "pickup.city"
+    | "pickup.state"
+    | "pickup.zip"
+    | "pickup.windowStart"
+    | "pickup.windowEnd"
+    | "delivery.line1"
+    | "delivery.city"
+    | "delivery.state"
+    | "delivery.zip"
+    | "delivery.windowStart"
+    | "delivery.windowEnd",
+    string
+  >
+>;
+
+/* -------------------------------------------------------------------------- */
+/*  Component                                                                 */
+/* -------------------------------------------------------------------------- */
+
 function NewLoadPage() {
+  const navigate = useNavigate();
+  const [form, setForm] = React.useState<LoadDraft>(INITIAL);
+  const [errors, setErrors] = React.useState<Errors>({});
+  const [submitting, setSubmitting] = React.useState(false);
+
+  // Dedup brokers from fixture loads (no separate broker fixture yet).
+  const brokers = React.useMemo(() => {
+    const map = new Map<string, { id: string; companyName: string }>();
+    for (const l of FIXTURE_LOADS) map.set(l.broker.id, l.broker);
+    return Array.from(map.values()).sort((a, b) =>
+      a.companyName.localeCompare(b.companyName),
+    );
+  }, []);
+
+  const activeDrivers = React.useMemo(
+    () => FIXTURE_DRIVERS.filter((d) => d.status === "active"),
+    [],
+  );
+  const activeTrucks = React.useMemo(
+    () => FIXTURE_TRUCKS.filter((t) => t.status === "active"),
+    [],
+  );
+
+  const selectedDriver = activeDrivers.find(
+    (d) => d.id === form.assignedDriverId,
+  );
+
+  // When the driver changes, auto-suggest their default truck if any and
+  // nothing has been picked yet.
+  React.useEffect(() => {
+    if (!selectedDriver) return;
+    if (selectedDriver.assignedTruck && !form.assignedTruckId) {
+      setForm((f) => ({
+        ...f,
+        assignedTruckId: selectedDriver.assignedTruck!.id,
+      }));
+    }
+  }, [form.assignedDriverId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isPerMile = selectedDriver?.payModel === "per_mile";
+
+  /* ----- helpers ----- */
+
+  const set = <K extends keyof LoadDraft>(key: K, value: LoadDraft[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  const setStop = (which: "pickup" | "delivery", patch: Partial<StopDraft>) =>
+    setForm((f) => ({ ...f, [which]: { ...f[which], ...patch } }));
+
+  const validate = (): Errors => {
+    const e: Errors = {};
+
+    if (!form.brokerId) e.brokerId = "Pick a broker";
+    if (!form.commodity.trim()) e.commodity = "Required";
+
+    const rate = Number(form.rateDollars);
+    if (!form.rateDollars || Number.isNaN(rate) || rate <= 0)
+      e.rateDollars = "Enter the rate in dollars";
+
+    if (isPerMile) {
+      const miles = Number(form.miles);
+      if (!form.miles || Number.isNaN(miles) || miles <= 0)
+        e.miles = "Miles required — assigned driver is paid per mile";
+    }
+
+    for (const which of ["pickup", "delivery"] as const) {
+      const s = form[which];
+      if (!s.line1.trim()) e[`${which}.line1`] = "Required";
+      if (!s.city.trim()) e[`${which}.city`] = "Required";
+      if (!s.state) e[`${which}.state`] = "Required";
+      if (!/^\d{5}(-\d{4})?$/.test(s.zip)) e[`${which}.zip`] = "Invalid ZIP";
+      if (!s.windowStart) e[`${which}.windowStart`] = "Required";
+      if (!s.windowEnd) e[`${which}.windowEnd`] = "Required";
+      if (
+        s.windowStart &&
+        s.windowEnd &&
+        new Date(s.windowEnd) < new Date(s.windowStart)
+      )
+        e[`${which}.windowEnd`] = "End must be after start";
+    }
+
+    // Delivery window cannot start before pickup window.
+    if (
+      form.pickup.windowStart &&
+      form.delivery.windowStart &&
+      new Date(form.delivery.windowStart) < new Date(form.pickup.windowStart)
+    ) {
+      e["delivery.windowStart"] = "Delivery can't be before pickup";
+    }
+
+    return e;
+  };
+
+  const handleSubmit = (ev: React.FormEvent) => {
+    ev.preventDefault();
+    const v = validate();
+    setErrors(v);
+    if (Object.keys(v).length > 0) {
+      // Scroll the first error into view for long forms.
+      const firstKey = Object.keys(v)[0];
+      document
+        .querySelector(`[data-field="${firstKey}"]`)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
+
+    setSubmitting(true);
+    // Stubbed submit — replace with createLoad server function.
+    // eslint-disable-next-line no-console
+    console.info("[createLoad:stub]", {
+      ...form,
+      rateCents: Math.round(Number(form.rateDollars) * 100),
+      status: form.assignedDriverId ? "assigned" : "draft",
+    });
+    window.setTimeout(() => {
+      navigate({ to: "/admin/loads" });
+    }, 600);
+  };
+
+  const canAssign = !!form.assignedDriverId;
+
   return (
-    <div className="flex flex-col gap-5">
+    <form
+      onSubmit={handleSubmit}
+      className="flex flex-col gap-5 pb-[calc(9rem+env(safe-area-inset-bottom))] md:pb-24"
+      noValidate
+    >
       <BackLink to="/admin/loads">Back to loads</BackLink>
       <PageHeader
         eyebrow="Dispatch"
         title="New load"
-        description="Create a load manually. For broker-emailed rate confirmations, use the AI intake (Phase 1.5)."
+        description="Create a load manually. For broker-emailed rate confirmations, use AI intake (Phase 1.5)."
       />
-      <PagePlaceholder
-        title="Create-load form coming soon"
-        description="Broker + pickup/delivery (Google Places autocomplete), commodity, rate, driver/truck assignment, rate confirmation upload. Wires to the createLoad server function."
+
+      {/* Broker + reference */}
+      <Section
+        title="Broker & reference"
+        description="Who's paying for this load and what's the broker's reference number?"
       >
-        <div className="flex items-center gap-2">
-          <Package className="size-4 text-[var(--primary)]" />
-          Spec: 03-ROUTES-AND-FEATURES §2.2
+        <div className="grid gap-4 sm:grid-cols-[1fr_minmax(180px,240px)]">
+          <FormField label="Broker" required error={errors.brokerId}>
+            <Select
+              value={form.brokerId}
+              onValueChange={(v) => set("brokerId", v)}
+            >
+              <SelectTrigger data-field="brokerId">
+                <SelectValue placeholder="Select broker" />
+              </SelectTrigger>
+              <SelectContent>
+                {brokers.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    <span className="inline-flex items-center gap-2">
+                      <Building2 className="size-3.5 text-muted-foreground" />
+                      {b.companyName}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
+
+          <FormField
+            label="Broker reference #"
+            hint="Their load number — appears on the rate con."
+          >
+            <Input
+              placeholder="e.g. CFS-88214"
+              value={form.referenceNumber}
+              onChange={(e) => set("referenceNumber", e.target.value)}
+            />
+          </FormField>
         </div>
-      </PagePlaceholder>
-    </div>
+      </Section>
+
+      {/* Pickup + Delivery side by side on desktop */}
+      <div className="grid gap-5 lg:grid-cols-2">
+        <StopSection
+          title="Pickup"
+          iconTone="success"
+          stop={form.pickup}
+          errors={errors}
+          namespace="pickup"
+          onChange={(patch) => setStop("pickup", patch)}
+        />
+        <StopSection
+          title="Delivery"
+          iconTone="primary"
+          stop={form.delivery}
+          errors={errors}
+          namespace="delivery"
+          onChange={(patch) => setStop("delivery", patch)}
+        />
+      </div>
+
+      {/* Load details */}
+      <Section
+        title="Load details"
+        description="Commodity, rate, and what Gary needs to invoice the broker."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <FormField
+            label="Commodity"
+            required
+            error={errors.commodity}
+            className="sm:col-span-2"
+          >
+            <Input
+              data-field="commodity"
+              placeholder="e.g. Palletized auto parts"
+              value={form.commodity}
+              onChange={(e) => set("commodity", e.target.value)}
+            />
+          </FormField>
+          <FormField label="BOL #" hint="If known at dispatch">
+            <Input
+              placeholder="Optional"
+              value={form.bolNumber}
+              onChange={(e) => set("bolNumber", e.target.value)}
+            />
+          </FormField>
+          <FormField label="Pieces" hint="Pallets, skids, or units">
+            <Input
+              type="number"
+              inputMode="numeric"
+              placeholder="Optional"
+              value={form.pieces}
+              onChange={(e) => set("pieces", e.target.value)}
+            />
+          </FormField>
+          <FormField label="Weight (lbs)">
+            <Input
+              type="number"
+              inputMode="numeric"
+              placeholder="Optional"
+              value={form.weight}
+              onChange={(e) => set("weight", e.target.value)}
+            />
+          </FormField>
+          <FormField
+            label="Rate"
+            required
+            error={errors.rateDollars}
+            hint="Dollars — broker pays this"
+          >
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
+                $
+              </span>
+              <Input
+                data-field="rateDollars"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                placeholder="2,850"
+                className="pl-7 font-mono tabular-nums"
+                value={form.rateDollars}
+                onChange={(e) => set("rateDollars", e.target.value)}
+              />
+            </div>
+          </FormField>
+          <FormField
+            label="Miles"
+            error={errors.miles}
+            hint={
+              isPerMile
+                ? "Required — driver is paid per mile"
+                : "Optional unless per-mile driver"
+            }
+            required={isPerMile}
+          >
+            <Input
+              data-field="miles"
+              type="number"
+              inputMode="numeric"
+              placeholder="612"
+              value={form.miles}
+              onChange={(e) => set("miles", e.target.value)}
+            />
+          </FormField>
+        </div>
+      </Section>
+
+      {/* Assignment */}
+      <Section
+        title="Assignment"
+        description="Leave blank to save as draft. Assigning notifies the driver and sets status to assigned."
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField
+            label="Driver"
+            meta={
+              selectedDriver && (
+                <span className="font-mono text-[11px]">
+                  {selectedDriver.cdlClass} · {selectedDriver.cdlState}
+                </span>
+              )
+            }
+            hint={
+              selectedDriver
+                ? `${selectedDriver.city}, ${selectedDriver.state} · ${selectedDriver.payModel === "percent_of_rate" ? `${(selectedDriver.payRate / 100).toFixed(1)}%` : selectedDriver.payModel === "per_mile" ? `$${(selectedDriver.payRate / 100).toFixed(2)}/mi` : `$${(selectedDriver.payRate / 100).toFixed(0)}/load`}`
+                : "Only active drivers listed"
+            }
+          >
+            <Select
+              value={form.assignedDriverId}
+              onValueChange={(v) =>
+                set("assignedDriverId", v === "__none__" ? "" : v)
+              }
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Pick a driver (optional)" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">
+                  <span className="text-muted-foreground">
+                    No driver — save as draft
+                  </span>
+                </SelectItem>
+                {activeDrivers.map((d) => (
+                  <SelectItem key={d.id} value={d.id}>
+                    <span className="inline-flex items-center gap-2">
+                      <UserRound className="size-3.5 text-muted-foreground" />
+                      {d.firstName} {d.lastName}
+                      {d.assignedTruck && (
+                        <span className="text-[11px] text-muted-foreground">
+                          · #{d.assignedTruck.unitNumber}
+                        </span>
+                      )}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
+
+          <FormField
+            label="Truck"
+            hint={
+              selectedDriver?.assignedTruck &&
+              form.assignedTruckId === selectedDriver.assignedTruck.id
+                ? `Auto-suggested from driver's default truck`
+                : "Select truck for this load"
+            }
+          >
+            <Select
+              value={form.assignedTruckId}
+              onValueChange={(v) =>
+                set("assignedTruckId", v === "__none__" ? "" : v)
+              }
+              disabled={!form.assignedDriverId}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={
+                    form.assignedDriverId
+                      ? "Pick a truck"
+                      : "Assign a driver first"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">
+                  <span className="text-muted-foreground">No truck</span>
+                </SelectItem>
+                {activeTrucks.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    <span className="inline-flex items-center gap-2">
+                      <Truck className="size-3.5 text-muted-foreground" />#
+                      {t.unitNumber} — {t.year} {t.make} {t.model}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
+        </div>
+      </Section>
+
+      {/* Special instructions */}
+      <Section
+        title="Special instructions"
+        description="Anything the driver needs at pickup or delivery. Shown on the load detail page."
+      >
+        <Textarea
+          rows={4}
+          placeholder="e.g. Rear door delivery only. Call receiver 30 min before arrival."
+          value={form.specialInstructions}
+          onChange={(e) => set("specialInstructions", e.target.value)}
+        />
+      </Section>
+
+      {/* Sticky action bar.
+          - Mobile (< md): sits above BottomTabBar (~64px) + safe-area inset
+          - Tablet + desktop (md+): flush to viewport bottom, offset left by
+            the sidebar width so it doesn't slide under the sidebar */}
+      <div
+        className={cn(
+          "fixed inset-x-0 z-20 border-t border-border bg-[var(--background)]/90 backdrop-blur",
+          "bottom-[calc(4rem+env(safe-area-inset-bottom))] md:bottom-0",
+          "md:left-[var(--sidebar-width,16rem)]",
+        )}
+      >
+        <div className="mx-auto flex w-full max-w-[1400px] items-center justify-between gap-3 px-4 py-3 sm:px-6 lg:px-8">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Package className="size-3.5" />
+            <span>
+              {canAssign ? (
+                <>
+                  Status will be{" "}
+                  <strong className="text-foreground">assigned</strong>
+                </>
+              ) : (
+                <>
+                  Status will be{" "}
+                  <strong className="text-foreground">draft</strong>
+                </>
+              )}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="md"
+              onClick={() => navigate({ to: "/admin/loads" })}
+              disabled={submitting}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              size="md"
+              disabled={submitting}
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  Saving…
+                </>
+              ) : (
+                <>
+                  {canAssign ? "Create & assign" : "Save as draft"}
+                  <ArrowRight className="size-4" />
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </div>
+    </form>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Stop section (pickup / delivery share this)                               */
+/* -------------------------------------------------------------------------- */
+
+function StopSection({
+  title,
+  iconTone,
+  stop,
+  errors,
+  namespace,
+  onChange,
+}: {
+  title: string;
+  iconTone: "success" | "primary";
+  stop: StopDraft;
+  errors: Errors;
+  namespace: "pickup" | "delivery";
+  onChange: (patch: Partial<StopDraft>) => void;
+}) {
+  return (
+    <Section
+      title={title}
+      actions={
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+            iconTone === "success" &&
+              "bg-[var(--success)]/12 text-[var(--success)]",
+            iconTone === "primary" &&
+              "bg-[var(--primary)]/12 text-[var(--primary)]",
+          )}
+        >
+          <MapPin className="size-3" />
+          {namespace === "pickup" ? "Origin" : "Destination"}
+        </span>
+      }
+    >
+      <div className="grid gap-4">
+        <FormField label="Shipper / consignee" hint="Company name at the stop">
+          <Input
+            placeholder="e.g. Acme Manufacturing"
+            value={stop.companyName}
+            onChange={(e) => onChange({ companyName: e.target.value })}
+          />
+        </FormField>
+
+        <FormField
+          label="Street address"
+          required
+          error={errors[`${namespace}.line1`]}
+        >
+          <Input
+            data-field={`${namespace}.line1`}
+            placeholder="1420 Industrial Blvd"
+            value={stop.line1}
+            onChange={(e) => onChange({ line1: e.target.value })}
+          />
+        </FormField>
+
+        <div className="grid grid-cols-[1fr_7rem_7rem] gap-3">
+          <FormField label="City" required error={errors[`${namespace}.city`]}>
+            <Input
+              data-field={`${namespace}.city`}
+              placeholder="Kansas City"
+              value={stop.city}
+              onChange={(e) => onChange({ city: e.target.value })}
+            />
+          </FormField>
+          <FormField
+            label="State"
+            required
+            error={errors[`${namespace}.state`]}
+          >
+            <Select
+              value={stop.state}
+              onValueChange={(v) => onChange({ state: v })}
+            >
+              <SelectTrigger data-field={`${namespace}.state`}>
+                <SelectValue placeholder="State" />
+              </SelectTrigger>
+              <SelectContent>
+                {US_STATES.map((s) => (
+                  <SelectItem key={s.code} value={s.code}>
+                    {s.code}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </FormField>
+          <FormField label="ZIP" required error={errors[`${namespace}.zip`]}>
+            <Input
+              data-field={`${namespace}.zip`}
+              inputMode="numeric"
+              maxLength={10}
+              placeholder="64120"
+              value={stop.zip}
+              onChange={(e) => onChange({ zip: e.target.value })}
+            />
+          </FormField>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FormField
+            label="Window start"
+            required
+            error={errors[`${namespace}.windowStart`]}
+          >
+            <Input
+              data-field={`${namespace}.windowStart`}
+              type="datetime-local"
+              value={stop.windowStart}
+              onChange={(e) => onChange({ windowStart: e.target.value })}
+            />
+          </FormField>
+          <FormField
+            label="Window end"
+            required
+            error={errors[`${namespace}.windowEnd`]}
+          >
+            <Input
+              data-field={`${namespace}.windowEnd`}
+              type="datetime-local"
+              value={stop.windowEnd}
+              onChange={(e) => onChange({ windowEnd: e.target.value })}
+            />
+          </FormField>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <FormField label="Contact name">
+            <Input
+              placeholder="Site contact"
+              value={stop.contactName}
+              onChange={(e) => onChange({ contactName: e.target.value })}
+            />
+          </FormField>
+          <FormField label="Contact phone">
+            <Input
+              type="tel"
+              inputMode="tel"
+              placeholder="(555) 555-0123"
+              value={stop.contactPhone}
+              onChange={(e) => onChange({ contactPhone: e.target.value })}
+            />
+          </FormField>
+        </div>
+
+        <FormField label="Stop notes" hint="Gate codes, dock info, etc.">
+          <Textarea
+            rows={2}
+            placeholder="Optional"
+            value={stop.notes}
+            onChange={(e) => onChange({ notes: e.target.value })}
+          />
+        </FormField>
+      </div>
+    </Section>
   );
 }

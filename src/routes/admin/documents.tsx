@@ -1,7 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import {
   AlertTriangle,
-  ArrowUpDown,
   Download,
   Eye,
   FileText,
@@ -13,12 +12,14 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
+import { toast } from "@/lib/toast";
 import { EmptyState } from "@/components/common/EmptyState";
 import { KpiCard } from "@/components/common/KpiCard";
 import { PageHeader } from "@/components/common/PageHeader";
 import { FilterChips } from "@/components/data/FilterChips";
 import { Pagination } from "@/components/data/Pagination";
 import { SearchInput } from "@/components/data/SearchInput";
+import { SortButton } from "@/components/data/SortButton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -116,7 +117,11 @@ function DocumentsPage() {
           title="Documents"
           description="Global document library with expiration tracking. Stay DOT-compliant."
           actions={
-            <Button variant="primary" size="md">
+            <Button
+              variant="primary"
+              size="md"
+              onClick={() => toast.info("Document upload — coming soon")}
+            >
               <Upload className="size-4" />
               Upload document
             </Button>
@@ -197,7 +202,11 @@ function DocumentsPage() {
               title="No documents match these filters"
               description="Adjust the filters above or upload a new document."
               action={
-                <Button variant="primary" size="sm">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => toast.info("Document upload — coming soon")}
+                >
                   <Upload className="size-4" />
                   Upload
                 </Button>
@@ -228,13 +237,7 @@ function DocumentsTable({ rows }: { rows: FixtureDocument[] }) {
       <TableHeader>
         <TableRow className="bg-muted/40 hover:bg-muted/40">
           <TableHead>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground"
-            >
-              Document
-              <ArrowUpDown className="size-3" aria-hidden />
-            </button>
+            <SortButton>Document</SortButton>
           </TableHead>
           <TableHead>Type</TableHead>
           <TableHead>Owner</TableHead>
@@ -293,6 +296,7 @@ function DocumentsTable({ rows }: { rows: FixtureDocument[] }) {
                   variant="ghost"
                   size="icon-sm"
                   aria-label="View document"
+                  onClick={() => toast.info("Document preview — coming soon")}
                 >
                   <Eye className="size-4" />
                 </Button>

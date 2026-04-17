@@ -9,7 +9,6 @@ import {
   Receipt,
   BarChart3,
   Settings,
-  History,
   FlaskConical,
   type LucideIcon,
 } from "lucide-react";
@@ -89,7 +88,10 @@ export const adminNavGroups: NavGroup[] = [
     label: "Insight",
     items: [
       { label: "Analytics", to: "/admin/analytics", icon: BarChart3 },
-      { label: "Audit log", to: "/admin/settings/audit", icon: History },
+      // Settings is the hub — Preferences / Integrations / Audit log live
+      // as tabs inside it rather than separate sidebar entries. Keeps the
+      // nav shorter and prevents the "three items highlighted at once" bug
+      // caused by shared /admin/settings/* prefixes.
       { label: "Settings", to: "/admin/settings", icon: Settings },
     ],
   },

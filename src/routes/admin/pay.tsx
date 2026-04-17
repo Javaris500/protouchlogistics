@@ -5,6 +5,8 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { toCsv, downloadCsv } from "@/lib/csv";
+import { toast } from "@/lib/toast";
 
 export const Route = createFileRoute("/admin/pay")({
   component: PayOverviewPage,
@@ -45,7 +47,27 @@ function PayOverviewPage() {
         title="Driver Pay"
         description="Weekly pay periods. Settle to mark drivers paid; drill in for per-driver and per-load breakdowns."
         actions={
-          <Button variant="outline" size="md">
+          <Button
+            variant="outline"
+            size="md"
+            onClick={() => {
+              const csv = toCsv(
+                PERIODS.map((p) => ({
+                  period_id: p.id,
+                  label: p.label,
+                  status: p.status,
+                  loads: p.loadCount,
+                  drivers: p.driverCount,
+                  total_cents: p.totalCents,
+                })),
+              );
+              downloadCsv(
+                `pay-periods-${new Date().toISOString().slice(0, 10)}`,
+                csv,
+              );
+              toast.success(`Exported ${PERIODS.length} pay periods`);
+            }}
+          >
             <Download className="size-4" /> Export CSV
           </Button>
         }

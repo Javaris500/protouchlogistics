@@ -31,17 +31,32 @@ export const Route = createFileRoute("/admin/dashboard")({
   component: DashboardPage,
 });
 
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 5) return "Working late";
+  if (h < 12) return "Good morning";
+  if (h < 17) return "Good afternoon";
+  if (h < 21) return "Good evening";
+  return "Working late";
+}
+
 function DashboardPage() {
+  const today = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+
   return (
     <div className="flex flex-col gap-6">
       <div className="animate-enter stagger-1">
         <PageHeader
-          eyebrow="Overview"
-          title="Dashboard"
-          description="Active loads, drivers on the road, outstanding AR, and expiring documents at a glance."
+          eyebrow={today}
+          title={`${greeting()}, Gary.`}
+          description="Here's what's moving today — active loads, drivers on the road, outstanding AR, and what needs your eyes next."
           actions={
             <Button asChild variant="primary" size="md">
-              <Link to="/admin/loads">
+              <Link to="/admin/loads/new">
                 New load
                 <ArrowRight className="size-4" />
               </Link>
@@ -101,7 +116,7 @@ function KpiRow() {
         value={formatCompactCents(k.invoicesOutstandingCents)}
         sublabel="unpaid invoices"
         icon={<CircleDollarSign />}
-        trend={k.trends.invoicesOutstandingCents}
+        trend={{ ...k.trends.invoicesOutstandingCents, positiveIsGood: false }}
       />
     </div>
   );

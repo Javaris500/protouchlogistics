@@ -49,7 +49,12 @@ function TableBody({ className, ...props }: React.ComponentProps<"tbody">) {
   return (
     <tbody
       data-slot="table-body"
-      className={cn("divide-y divide-border", className)}
+      className={cn(
+        // Softer divider — 70% of --border so the row separator recedes
+        // visually. Keeps the table breathing without shouting hairlines.
+        "divide-y divide-[color-mix(in_oklab,var(--border)_70%,transparent)]",
+        className,
+      )}
       {...props}
     />
   );
@@ -74,7 +79,9 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       data-slot="table-row"
       className={cn(
         "transition-colors duration-150 ease-out",
-        "hover:bg-muted/50 data-[state=selected]:bg-muted",
+        "hover:bg-muted/40 data-[state=selected]:bg-muted",
+        // Keyboard focus parity with hover so tab navigation is visible.
+        "focus-visible:bg-muted/40 focus-visible:outline-none",
         className,
       )}
       {...props}
@@ -87,8 +94,9 @@ function TableHead({ className, ...props }: React.ComponentProps<"th">) {
     <th
       data-slot="table-head"
       className={cn(
-        "h-10 px-3 text-left align-middle whitespace-nowrap",
-        "text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+        "h-11 px-3 text-left align-middle whitespace-nowrap",
+        // Tighter caps + slightly stronger tracking for better scannability
+        "text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground",
         "[&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className,
       )}
@@ -102,7 +110,8 @@ function TableCell({ className, ...props }: React.ComponentProps<"td">) {
     <td
       data-slot="table-cell"
       className={cn(
-        "px-3 py-3 align-middle whitespace-nowrap",
+        // Slightly more vertical breathing room (3 → 3.5) feels less cramped
+        "px-3 py-3.5 align-middle text-[13px] leading-tight",
         "[&:has([role=checkbox])]:pr-0 [&>[role=checkbox]]:translate-y-[2px]",
         className,
       )}

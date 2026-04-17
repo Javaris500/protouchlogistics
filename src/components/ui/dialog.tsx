@@ -28,6 +28,7 @@ function DialogClose({
   return <DialogPrimitive.Close data-slot="dialog-close" {...props} />;
 }
 
+/* Improvement #3 — softer overlay: 40% black + more blur for frosted-glass */
 function DialogOverlay({
   className,
   ...props
@@ -36,9 +37,9 @@ function DialogOverlay({
     <DialogPrimitive.Overlay
       data-slot="dialog-overlay"
       className={cn(
-        "fixed inset-0 z-50 bg-black/60 backdrop-blur-[3px]",
-        "data-[state=open]:animate-in data-[state=open]:fade-in-0",
-        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0",
+        "fixed inset-0 z-50 bg-black/40 backdrop-blur-[6px]",
+        "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:duration-200",
+        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:duration-150",
         className,
       )}
       {...props}
@@ -47,9 +48,10 @@ function DialogOverlay({
 }
 
 /**
- * Dialog content. Responsive by default: centered card on ≥sm viewports,
- * bottom-anchored sheet on mobile so Gary can tap-dismiss and reach form
- * fields without hovering his thumb over the keyboard.
+ * Dialog content. Responsive by default: centered card on sm+ viewports,
+ * bottom-anchored sheet on mobile.
+ *
+ * Improvement #4 — smoother open: translateY + gentle scale, slower curve.
  */
 function DialogContent({
   className,
@@ -75,19 +77,22 @@ function DialogContent({
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed z-50 grid w-full gap-0 bg-[var(--popover)] text-[var(--popover-foreground)] shadow-[var(--shadow-lg)]",
+          "fixed z-50 grid w-full gap-0",
+          "bg-[var(--popover)] text-[var(--popover-foreground)]",
+          "shadow-[var(--shadow-lg)]",
           "border border-[var(--border)]",
-          /* Mobile: bottom sheet. */
+          /* Mobile: bottom sheet */
           "inset-x-0 bottom-0 rounded-t-[var(--radius-xl)]",
           "data-[state=open]:animate-in data-[state=open]:slide-in-from-bottom",
           "data-[state=closed]:animate-out data-[state=closed]:slide-out-to-bottom",
-          "data-[state=open]:duration-300 data-[state=closed]:duration-200",
-          /* Desktop (sm+): centered modal. */
+          "data-[state=open]:duration-350 data-[state=closed]:duration-200",
+          /* Desktop (sm+): centered modal with float-up + scale */
           "sm:left-1/2 sm:right-auto sm:top-1/2 sm:bottom-auto",
           "sm:-translate-x-1/2 sm:-translate-y-1/2",
           "sm:rounded-[var(--radius-xl)]",
-          "sm:data-[state=open]:zoom-in-95 sm:data-[state=closed]:zoom-out-95",
-          "sm:data-[state=open]:slide-in-from-top-[2%] sm:data-[state=closed]:slide-out-to-top-[2%]",
+          "sm:data-[state=open]:zoom-in-[0.97] sm:data-[state=closed]:zoom-out-[0.97]",
+          "sm:data-[state=open]:slide-in-from-top-[3%] sm:data-[state=closed]:slide-out-to-top-[1%]",
+          "sm:data-[state=open]:fade-in-0 sm:data-[state=closed]:fade-out-0",
           "max-h-[92dvh] overflow-hidden",
           sizeClass[size],
           className,
@@ -95,17 +100,19 @@ function DialogContent({
         {...props}
       >
         {children}
+        {/* Improvement #9 — smaller, ghost close button with hover ring */}
         {!hideClose && (
           <DialogPrimitive.Close
             className={cn(
-              "absolute right-4 top-4 inline-flex h-8 w-8 items-center justify-center rounded-md",
-              "text-[var(--muted-foreground)] opacity-80 transition-all",
-              "hover:bg-[var(--muted)] hover:opacity-100 hover:text-[var(--foreground)]",
-              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
+              "absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full",
+              "text-[var(--muted-foreground)] opacity-60",
+              "transition-all duration-150",
+              "hover:bg-[var(--surface-2)] hover:opacity-100 hover:text-[var(--foreground)]",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)] focus-visible:ring-offset-1",
               "disabled:pointer-events-none",
             )}
           >
-            <XIcon className="size-4" />
+            <XIcon className="size-3.5" />
             <span className="sr-only">Close</span>
           </DialogPrimitive.Close>
         )}
@@ -114,12 +121,14 @@ function DialogContent({
   );
 }
 
+/* Improvement #2 — softer header border: use a lighter opacity */
 function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
       className={cn(
-        "flex flex-col gap-1.5 border-b border-[var(--border)] px-6 py-5",
+        "flex flex-col gap-1.5 px-6 py-5",
+        "border-b border-[var(--border)]/60",
         "text-left",
         className,
       )}
@@ -128,12 +137,14 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/* Improvement #1 — no scrollbar: scrollbar-none replaces scrollbar-thin */
 function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-body"
       className={cn(
-        "flex-1 overflow-y-auto px-6 py-5 scrollbar-thin",
+        "flex-1 overflow-y-auto px-6 py-5",
+        "scrollbar-none",
         className,
       )}
       {...props}
@@ -141,13 +152,15 @@ function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+/* Improvement #2 — softer footer: lighter border, transparent bg */
 function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-footer"
       className={cn(
-        "flex flex-col-reverse gap-2 border-t border-[var(--border)] px-6 py-4",
-        "bg-[var(--surface)]",
+        "flex flex-col-reverse gap-2 px-6 py-4",
+        "border-t border-[var(--border)]/60",
+        "bg-[var(--surface)]/50",
         "sm:flex-row sm:justify-end",
         className,
       )}

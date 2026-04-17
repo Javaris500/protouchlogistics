@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   CalendarClock,
   Gauge,
@@ -229,6 +229,7 @@ function TrucksListPage() {
 }
 
 function TrucksTable({ rows }: { rows: FixtureTruck[] }) {
+  const navigate = useNavigate();
   return (
     <Table>
       <TableHeader>
@@ -247,7 +248,16 @@ function TrucksTable({ rows }: { rows: FixtureTruck[] }) {
       </TableHeader>
       <TableBody>
         {rows.map((t) => (
-          <TableRow key={t.id} className="cursor-pointer">
+          <TableRow
+            key={t.id}
+            className="cursor-pointer"
+            onClick={() =>
+              navigate({
+                to: "/admin/trucks/$truckId",
+                params: { truckId: t.id },
+              })
+            }
+          >
             <TableCell>
               <Link
                 to="/admin/trucks/$truckId"
@@ -287,6 +297,7 @@ function TrucksTable({ rows }: { rows: FixtureTruck[] }) {
               ) : (
                 <button
                   type="button"
+                  onClick={(e) => e.stopPropagation()}
                   className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-[var(--primary)]"
                 >
                   <UserPlus className="size-3" aria-hidden />

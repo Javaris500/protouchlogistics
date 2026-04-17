@@ -1,14 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
-import {
-  ArrowUpDown,
-  Clock,
-  Filter,
-  History,
-  Search,
-  User,
-} from "lucide-react";
+import { Clock, Filter, History, Search, User } from "lucide-react";
 
-import { PageHeader } from "@/components/common/PageHeader";
+import { toast } from "@/lib/toast";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -104,18 +97,24 @@ const ACTION_COLORS: Record<string, string> = {
 
 function AuditPage() {
   return (
-    <div className="flex flex-col gap-5">
-      <PageHeader
-        eyebrow="Settings"
-        title="Audit Log"
-        description="Immutable record of every mutation. Filter by entity, user, or date range."
-        actions={
-          <Button variant="outline" size="md">
-            <Filter className="size-4" />
-            Filters
-          </Button>
-        }
-      />
+    <div className="flex flex-col gap-4">
+      {/* Layout (src/routes/admin/settings.tsx) owns the PageHeader + tabs.
+          Keeping a section-level Filters button inline here so the tab
+          content still has local actions where they belong. */}
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Immutable record of every mutation. Filter by entity, user, or date
+          range.
+        </p>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => toast.info("Filter panel — coming soon")}
+        >
+          <Filter className="size-4" />
+          Filters
+        </Button>
+      </div>
 
       <Card className="gap-0 overflow-hidden py-0">
         {/* Timeline-style entries */}
@@ -181,7 +180,11 @@ function AuditPage() {
 
         {/* Footer */}
         <div className="border-t border-border px-5 py-3 text-center">
-          <Button variant="ghost" size="sm">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => toast.info("Pagination — coming soon")}
+          >
             Load more entries
           </Button>
         </div>

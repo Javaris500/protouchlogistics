@@ -1,17 +1,30 @@
-import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import {
   AlertOctagon,
+  Calendar,
+  Check,
   FileText,
+  Mail,
+  MapPin,
   MoreHorizontal,
   Pencil,
   Phone,
   ShieldCheck,
   Truck,
+  Upload,
   UserCircle2,
+  UserCog,
+  Wallet,
+  X,
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 
+import { toast } from "@/lib/toast";
 import { BackLink } from "@/components/common/BackLink";
+import { EntityChip } from "@/components/common/EntityChip";
+import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -25,13 +38,17 @@ import {
 import { ExpirationBadge } from "@/components/ui/expiration-badge";
 import { Separator } from "@/components/ui/separator";
 import { StatusPill } from "@/components/ui/status-pill";
+import type { DriverStatus } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { FixtureDriver } from "@/lib/fixtures/drivers";
 import {
   FIXTURE_DRIVERS,
   PAY_MODEL_LABEL,
   formatPayRate,
   formatPhone,
 } from "@/lib/fixtures/drivers";
+import { daysUntil } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/drivers/$driverId")({
   loader: ({ params }) => {
@@ -44,30 +61,51 @@ export const Route = createFileRoute("/admin/drivers/$driverId")({
 
 function DriverDetailPage() {
   const { driver } = Route.useLoaderData();
+  const primary = primaryActionFor(driver.status);
+  const cdlDays = daysUntil(driver.cdlExpiration);
+  const medDays = daysUntil(driver.medicalExpiration);
+  const criticalDays = Math.min(cdlDays, medDays);
 
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/drivers">Back to drivers</BackLink>
 
-      <PageHeader
-        eyebrow="Driver"
-        title={
-          <span className="inline-flex items-center gap-3">
-            <span>
-              {driver.firstName} {driver.lastName}
-            </span>
-            <StatusPill kind="driver" status={driver.status} />
-          </span>
-        }
-        description={
-          driver.hireDate
-            ? `Hired ${driver.hireDate} · Pay ${formatPayRate(driver)} (${PAY_MODEL_LABEL[driver.payModel]})`
-            : `Pay ${formatPayRate(driver)} (${PAY_MODEL_LABEL[driver.payModel]})`
-        }
-        actions={
-          <>
-            <Button variant="outline" size="md">
-              <Pencil className="size-4" /> Edit
+      <section className="animate-enter stagger-1 flex flex-col gap-5">
+        {/* Identity hero — avatar + name + contact chips */}
+        <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
+          <Avatar driver={driver} />
+          <div className="flex min-w-0 flex-1 flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+                {driver.firstName} {driver.lastName}
+              </h1>
+              <StatusPill kind="driver" status={driver.status} />
+            </div>
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <Phone className="size-3" /> {formatPhone(driver.phone)}
+              </span>
+              <span className="inline-flex items-center gap-1.5 truncate">
+                <Mail className="size-3" /> {driver.email}
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <MapPin className="size-3" /> {driver.city}, {driver.state}
+              </span>
+              {driver.hireDate && (
+                <span className="inline-flex items-center gap-1.5">
+                  <Calendar className="size-3" /> Hired {driver.hireDate}
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap items-center gap-2">
+            <Button
+              variant={primary.variant}
+              size="md"
+              onClick={() => toast.info(`${primary.label} — coming soon`)}
+            >
+              <primary.icon className="size-4" />
+              {primary.label}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -82,38 +120,79 @@ function DriverDetailPage() {
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-48">
                 <DropdownMenuLabel>Driver actions</DropdownMenuLabel>
-                <DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() =>
+                    toast.success(
+                      `2FA reset for ${driver.firstName} ${driver.lastName}`,
+                    )
+                  }
+                >
                   <ShieldCheck /> Reset 2FA
                 </DropdownMenuItem>
-                <DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => toast.info("Document request — coming soon")}
+                >
                   <FileText /> Request new doc
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem variant="danger">
+                <DropdownMenuItem
+                  variant="danger"
+                  onSelect={() => {
+                    if (
+                      window.confirm(
+                        `Suspend ${driver.firstName} ${driver.lastName}? They'll lose dispatch access immediately.`,
+                      )
+                    ) {
+                      toast.success(
+                        `${driver.firstName} ${driver.lastName} suspended`,
+                      );
+                    }
+                  }}
+                >
                   <AlertOctagon /> Suspend driver
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-          </>
-        }
-      />
+          </div>
+        </Card>
 
-      <Tabs defaultValue="overview">
+        <KeyStatStrip
+          stats={[
+            {
+              label: "Loads YTD",
+              value: driver.loadsThisYear.toLocaleString(),
+              sublabel: "delivered this year",
+              mono: true,
+              emphasis: true,
+            },
+            {
+              label: "Pay model",
+              value: formatPayRate(driver),
+              sublabel: PAY_MODEL_LABEL[driver.payModel],
+              mono: true,
+            },
+            {
+              label: "Next expiration",
+              value: criticalDays < 0 ? "Expired" : `${criticalDays}d`,
+              sublabel: cdlDays < medDays ? "CDL" : "Medical card",
+              mono: true,
+            },
+          ]}
+        />
+      </section>
+
+      <Tabs defaultValue="overview" className="animate-enter stagger-2">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
+          <TabsTrigger value="compliance">Compliance</TabsTrigger>
           <TabsTrigger value="pay">Pay</TabsTrigger>
           <TabsTrigger value="loads">Loads</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="mt-4">
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card className="gap-0 p-5 lg:col-span-2">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                <UserCircle2 className="size-3.5" /> Contact
-              </div>
-              <Separator className="my-3" />
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+            <Panel icon={UserCircle2} title="Contact" className="lg:col-span-2">
+              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
                 <Field label="Email" value={driver.email} />
                 <Field label="Phone" value={formatPhone(driver.phone)} mono />
                 <Field
@@ -121,110 +200,317 @@ function DriverDetailPage() {
                   value={`${driver.city}, ${driver.state}`}
                 />
                 <Field
-                  label="Loads YTD"
-                  value={String(driver.loadsThisYear)}
-                  mono
+                  label="Hire date"
+                  value={driver.hireDate ?? "—"}
+                  mono={!!driver.hireDate}
                 />
               </dl>
-            </Card>
+            </Panel>
 
-            <Card className="gap-0 p-5">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                <Truck className="size-3.5" /> Assignment
-              </div>
-              <Separator className="my-3" />
+            <Panel icon={Truck} title="Assignment">
               {driver.assignedTruck ? (
-                <Link
-                  to="/admin/trucks/$truckId"
-                  params={{ truckId: driver.assignedTruck.id }}
-                  className="flex items-center gap-3 rounded-[var(--radius-md)] p-2 transition-colors hover:bg-[var(--surface-2)]"
-                >
-                  <div className="flex size-9 items-center justify-center rounded-md bg-[var(--surface-2)]">
-                    <Truck className="size-4 text-muted-foreground" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="font-mono text-sm font-medium">
-                      Unit {driver.assignedTruck.unitNumber}
-                    </span>
-                    <span className="text-[11px] text-muted-foreground">
-                      View truck profile →
-                    </span>
-                  </div>
-                </Link>
+                <div className="flex flex-col gap-3">
+                  <EntityChip
+                    kind="truck"
+                    id={driver.assignedTruck.id}
+                    label={`Unit ${driver.assignedTruck.unitNumber}`}
+                    mono
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    Default truck. Auto-suggested when dispatching new loads.
+                  </p>
+                </div>
               ) : (
-                <Button variant="outline" size="sm">
-                  <Truck className="size-4" /> Assign truck
-                </Button>
+                <div className="flex flex-col items-start gap-3">
+                  <p className="text-sm text-muted-foreground">
+                    No default truck assigned.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => toast.info("Assign truck — coming soon")}
+                  >
+                    <Truck className="size-4" /> Assign truck
+                  </Button>
+                </div>
               )}
-            </Card>
+            </Panel>
 
-            <Card className="gap-0 p-5 lg:col-span-3">
-              <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                <ShieldCheck className="size-3.5" /> Credentials
+            <Panel
+              icon={ShieldCheck}
+              title="Compliance at a glance"
+              className="lg:col-span-3"
+            >
+              <div className="grid gap-3 sm:grid-cols-2">
+                <CredentialBlock
+                  title="CDL"
+                  metaLeft={`Class ${driver.cdlClass} · ${driver.cdlState}`}
+                  metaRight={driver.cdlNumber}
+                  metaRightMono
+                  expiration={driver.cdlExpiration}
+                />
+                <CredentialBlock
+                  title="Medical card"
+                  metaLeft="DOT-certified exam"
+                  expiration={driver.medicalExpiration}
+                />
               </div>
-              <Separator className="my-3" />
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
-                <Field label="CDL class" value={driver.cdlClass} />
-                <Field label="CDL number" value={driver.cdlNumber} mono />
-                <Field label="CDL state" value={driver.cdlState} />
-                <div className="flex flex-col gap-1">
-                  <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    CDL expires
-                  </dt>
-                  <dd>
-                    <ExpirationBadge date={driver.cdlExpiration} />
-                  </dd>
-                </div>
-                <div className="flex flex-col gap-1 sm:col-span-4">
-                  <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    Medical card expires
-                  </dt>
-                  <dd>
-                    <ExpirationBadge date={driver.medicalExpiration} />
-                  </dd>
-                </div>
-              </dl>
-            </Card>
+            </Panel>
           </div>
         </TabsContent>
 
-        <TabsContent value="documents" className="mt-4">
-          <Card className="flex flex-col items-center justify-center gap-3 py-16">
-            <FileText className="size-8 text-muted-foreground" />
-            <p className="text-sm font-medium">
-              CDL, medical card, MVR, drug test
-            </p>
-            <p className="max-w-sm text-center text-xs text-muted-foreground">
-              Driver qualification file lives here. Expiration-tracked documents
-              surface at the top.
-            </p>
+        <TabsContent value="compliance" className="mt-4">
+          <Card className="gap-0 p-0">
+            <ul className="divide-y divide-border">
+              <ComplianceRow
+                icon={ShieldCheck}
+                label="CDL"
+                sublabel={`Class ${driver.cdlClass} · ${driver.cdlState} · ${driver.cdlNumber}`}
+                date={driver.cdlExpiration}
+              />
+              <ComplianceRow
+                icon={ShieldCheck}
+                label="Medical card"
+                sublabel="DOT-certified examiner"
+                date={driver.medicalExpiration}
+              />
+              <MissingDocRow label="MVR" description="Motor vehicle record" />
+              <MissingDocRow
+                label="Drug test"
+                description="Pre-employment + random"
+              />
+            </ul>
           </Card>
         </TabsContent>
 
         <TabsContent value="pay" className="mt-4">
-          <Card className="flex flex-col items-center justify-center gap-3 py-16">
-            <p className="text-sm font-medium">Per-period pay breakdown</p>
-            <p className="max-w-sm text-center text-xs text-muted-foreground">
-              YTD, current period, past periods. Drilldown to per-load calc.
-            </p>
-          </Card>
+          <EmptyCard
+            icon={Wallet}
+            title="Pay data loads from /admin/pay"
+            description={`Pay model: ${PAY_MODEL_LABEL[driver.payModel]} at ${formatPayRate(driver)}. Per-period settlements appear here once the pay feature is wired.`}
+          />
         </TabsContent>
 
         <TabsContent value="loads" className="mt-4">
-          <Card className="flex flex-col items-center justify-center gap-3 py-16">
-            <div className="flex size-10 items-center justify-center rounded-full bg-muted">
-              <Phone className="size-5 text-muted-foreground" />
-            </div>
-            <p className="text-sm font-medium">
-              Loads delivered by this driver
-            </p>
-            <p className="max-w-sm text-center text-xs text-muted-foreground">
-              Most recent first. Filter by status, broker, date range.
-            </p>
-          </Card>
+          <EmptyCard
+            icon={Truck}
+            title="No recent loads"
+            description={`Loads delivered by ${driver.firstName} appear here — most recent first. Filter by status, broker, or date range.`}
+          />
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Avatar                                                                    */
+/* -------------------------------------------------------------------------- */
+
+function Avatar({ driver }: { driver: FixtureDriver }) {
+  const initials =
+    `${driver.firstName[0] ?? ""}${driver.lastName[0] ?? ""}`.toUpperCase();
+  return (
+    <div
+      aria-hidden="true"
+      className={cn(
+        "flex size-16 shrink-0 items-center justify-center rounded-full sm:size-20",
+        "bg-[color-mix(in_oklab,var(--primary)_14%,transparent)] text-[var(--primary)]",
+        "ring-2 ring-[var(--primary)]/25",
+        "text-xl font-bold tracking-tight sm:text-2xl",
+      )}
+    >
+      {initials}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Credential block — compact block for the Overview's at-a-glance strip     */
+/* -------------------------------------------------------------------------- */
+
+function CredentialBlock({
+  title,
+  metaLeft,
+  metaRight,
+  metaRightMono,
+  expiration,
+}: {
+  title: string;
+  metaLeft?: string;
+  metaRight?: string;
+  metaRightMono?: boolean;
+  expiration: string;
+}) {
+  const days = daysUntil(expiration);
+  const tone =
+    days < 0
+      ? "border-[var(--danger)]/40 bg-[color-mix(in_oklab,var(--danger)_5%,transparent)]"
+      : days <= 14
+        ? "border-[var(--warning)]/40 bg-[color-mix(in_oklab,var(--warning)_5%,transparent)]"
+        : "border-[var(--border)] bg-[var(--background)]";
+
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-2 rounded-[var(--radius-md)] border p-4",
+        tone,
+      )}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-semibold">{title}</span>
+        <ExpirationBadge date={expiration} />
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        {metaLeft && <span>{metaLeft}</span>}
+        {metaRight && (
+          <span className={metaRightMono ? "font-mono" : undefined}>
+            {metaRight}
+          </span>
+        )}
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        Expires <span className="font-mono">{expiration}</span>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Compliance tab rows                                                        */
+/* -------------------------------------------------------------------------- */
+
+function ComplianceRow({
+  icon: Icon,
+  label,
+  sublabel,
+  date,
+}: {
+  icon: LucideIcon;
+  label: string;
+  sublabel: string;
+  date: string;
+}) {
+  const days = daysUntil(date);
+  const urgent = days <= 14;
+  return (
+    <li className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+      <div className="flex min-w-0 items-center gap-3">
+        <div
+          className={cn(
+            "flex size-9 shrink-0 items-center justify-center rounded-md",
+            urgent
+              ? "bg-[color-mix(in_oklab,var(--warning)_15%,transparent)] text-[var(--warning)]"
+              : "bg-muted text-muted-foreground",
+          )}
+        >
+          <Icon className="size-4" />
+        </div>
+        <div className="flex min-w-0 flex-col">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="truncate text-[11px] text-muted-foreground">
+            {sublabel}
+          </span>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <ExpirationBadge date={date} />
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => toast.info("Document upload — coming soon")}
+        >
+          <Upload className="size-3.5" /> Replace
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+function MissingDocRow({
+  label,
+  description,
+}: {
+  label: string;
+  description: string;
+}) {
+  return (
+    <li className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5">
+      <div className="flex min-w-0 items-center gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-dashed border-[var(--border-strong)] text-[var(--subtle-foreground)]">
+          <X className="size-4" />
+        </div>
+        <div className="flex min-w-0 flex-col">
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-[11px] text-muted-foreground">
+            {description}
+          </span>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Badge variant="muted" className="text-[10px]">
+          Not on file
+        </Badge>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => toast.info("Document upload — coming soon")}
+        >
+          <Upload className="size-3.5" /> Upload
+        </Button>
+      </div>
+    </li>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Shared primitives                                                         */
+/* -------------------------------------------------------------------------- */
+
+interface PrimaryAction {
+  label: string;
+  icon: LucideIcon;
+  variant: "primary" | "outline";
+}
+
+function primaryActionFor(status: DriverStatus): PrimaryAction {
+  switch (status) {
+    case "pending_approval":
+      return { label: "Approve", icon: Check, variant: "primary" };
+    case "invited":
+      return { label: "Resend invite", icon: Mail, variant: "outline" };
+    case "suspended":
+      return { label: "Reinstate", icon: UserCog, variant: "primary" };
+    case "active":
+    default:
+      return { label: "Edit", icon: Pencil, variant: "outline" };
+  }
+}
+
+function Panel({
+  icon: Icon,
+  title,
+  trailing,
+  children,
+  className,
+}: {
+  icon: LucideIcon;
+  title: string;
+  trailing?: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <Card className={cn("gap-0 p-5", className)}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+          <Icon className="size-3.5" /> {title}
+        </div>
+        {trailing}
+      </div>
+      <Separator className="my-3" />
+      {children}
+    </Card>
   );
 }
 
@@ -246,5 +532,30 @@ function Field({
         {value}
       </dd>
     </div>
+  );
+}
+
+function EmptyCard({
+  icon: Icon,
+  title,
+  description,
+  action,
+}: {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <Card className="flex flex-col items-center justify-center gap-3 py-16">
+      <div className="flex size-10 items-center justify-center rounded-full bg-[color-mix(in_oklab,var(--primary)_10%,transparent)]">
+        <Icon className="size-5 text-[var(--primary)]" />
+      </div>
+      <p className="text-sm font-medium">{title}</p>
+      <p className="max-w-sm text-center text-xs text-muted-foreground">
+        {description}
+      </p>
+      {action}
+    </Card>
   );
 }

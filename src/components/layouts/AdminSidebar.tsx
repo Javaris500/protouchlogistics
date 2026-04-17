@@ -1,5 +1,6 @@
+import * as React from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LogOut, PanelLeftClose, PanelLeftOpen, Search } from "lucide-react";
+import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 
 import {
   Sidebar,
@@ -9,7 +10,6 @@ import {
   SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
-  SidebarInput,
   SidebarMenu,
   SidebarMenuBadge,
   SidebarMenuButton,
@@ -25,33 +25,54 @@ import { adminNavGroups, type NavBadgeTone } from "./nav-items";
 export function AdminSidebar() {
   const { state, toggleSidebar, isMobile } = useSidebar();
   const collapsed = state === "collapsed";
+  // Compute once for the whole sidebar — every nav item compares against
+  // this instead of running its own startsWith check. Guarantees that only
+  // the most-specific matching nav item lights up.
+  const activePath = useActiveNavPath();
 
   return (
     <Sidebar collapsible="icon" variant="floating">
-      <SidebarHeader className="pb-0">
+      <SidebarHeader className="border-b border-[var(--sidebar-border-strong)]/50 pb-3">
         <BrandRow
           collapsed={collapsed}
           onToggle={toggleSidebar}
           showToggle={!isMobile}
         />
-        {!collapsed && <SidebarSearch />}
       </SidebarHeader>
 
-      <SidebarContent className="scrollbar-thin px-1.5">
+      <SidebarContent
+        className={cn(
+          "scrollbar-thin relative px-1.5",
+          // Subtle scroll-fade at the top and bottom so long nav lists don't
+          // collide visually with the fixed header/footer. Pure mask-image,
+          // no extra DOM.
+          "[mask-image:linear-gradient(to_bottom,transparent,black_12px,black_calc(100%-12px),transparent)]",
+        )}
+      >
         {adminNavGroups.map((group, gi) => (
           <SidebarGroup key={group.id} className="py-1">
             {gi > 0 && (
               <SidebarSeparator className="mx-1.5 mb-2 bg-[var(--sidebar-border-strong)]/50" />
             )}
             {group.label && (
-              <SidebarGroupLabel className="mb-1 text-[10px] font-bold uppercase tracking-[0.14em]">
+              <SidebarGroupLabel
+                className={cn(
+                  "mb-1.5 h-auto px-2 py-0.5",
+                  "text-[10px] font-bold uppercase tracking-[0.16em]",
+                  "text-[var(--sidebar-muted)]/90",
+                )}
+              >
                 {group.label}
               </SidebarGroupLabel>
             )}
             <SidebarGroupContent>
-              <SidebarMenu className="gap-1">
+              <SidebarMenu className="gap-0.5">
                 {group.items.map((item) => (
-                  <AdminNavItem key={item.to} item={item} />
+                  <AdminNavItem
+                    key={item.to}
+                    item={item}
+                    activePath={activePath}
+                  />
                 ))}
               </SidebarMenu>
             </SidebarGroupContent>
@@ -190,45 +211,42 @@ function LogoMark() {
   );
 }
 
-function SidebarSearch() {
+/**
+ * The most-specific nav path that matches the current URL. Computed once per
+ * render so every AdminNavItem agrees on which single item should be active.
+ *
+ * Without this: a parent path like "/admin/settings" and a child path like
+ * "/admin/settings/audit" would both match their own `startsWith` rule when
+ * the user is on the audit page, lighting up two nav items at once.
+ */
+function useActiveNavPath(): string | null {
+  const { location } = useRouterState({
+    select: (s) => ({ location: s.location }),
+  });
+
+  // Flatten all nav item paths, sort by length descending — the most specific
+  // (deepest) route wins. If "/admin/settings/audit" matches, it's found
+  // before "/admin/settings" and we stop there.
+  const candidates = React.useMemo(() => {
+    const paths = adminNavGroups.flatMap((g) => g.items.map((i) => i.to));
+    return [...paths].sort((a, b) => b.length - a.length);
+  }, []);
+
   return (
-    <label className="relative mt-2 flex items-center">
-      <Search
-        aria-hidden="true"
-        className="pointer-events-none absolute left-3 h-3.5 w-3.5 text-[var(--sidebar-muted)]"
-      />
-      <SidebarInput
-        type="search"
-        placeholder="Search…"
-        className="h-8 border-0 pl-8 pr-12 text-xs shadow-none focus-visible:ring-0"
-        aria-label="Search"
-      />
-      <kbd
-        aria-hidden="true"
-        className={cn(
-          "pointer-events-none absolute right-2 inline-flex h-5 items-center gap-0.5 rounded px-1.5",
-          "bg-[var(--sidebar-kbd-bg)] text-[10px] font-medium text-[var(--sidebar-kbd-fg)]",
-          "border border-[var(--sidebar-border-strong)]",
-        )}
-      >
-        <span className="text-[11px] leading-none">⌘</span>
-        <span className="leading-none">K</span>
-      </kbd>
-    </label>
+    candidates.find(
+      (p) => location.pathname === p || location.pathname.startsWith(p + "/"),
+    ) ?? null
   );
 }
 
 function AdminNavItem({
   item,
+  activePath,
 }: {
   item: (typeof adminNavGroups)[number]["items"][number];
+  activePath: string | null;
 }) {
-  const { location } = useRouterState({
-    select: (s) => ({ location: s.location }),
-  });
-  const isActive =
-    location.pathname === item.to ||
-    location.pathname.startsWith(item.to + "/");
+  const isActive = activePath === item.to;
   const Icon = item.icon;
 
   return (
@@ -259,14 +277,24 @@ function AdminNavItem({
           !isActive &&
             "text-[var(--sidebar-muted)] hover:text-[var(--sidebar-foreground)]",
           isActive && [
-            "!bg-[var(--sidebar-active-bg)]",
+            // Clear the CVA's flat bg-color so the gradient reads cleanly
+            "!bg-transparent",
+            // Expanded active: horizontal copper gradient "lit" from the
+            // left accent bar outward — stronger near the bar, fading to
+            // transparent on the right so the pill feels radiant, not stamped.
+            "bg-[image:linear-gradient(90deg,rgb(242_122_26_/_0.16)_0%,rgb(242_122_26_/_0.06)_55%,transparent_100%)]",
+            // Inset copper hairline — defines the pill against the panel
+            // without adding visual noise.
+            "shadow-[inset_0_0_0_1px_rgb(242_122_26_/_0.12)]",
             "!text-[var(--sidebar-active-fg)]",
             "font-semibold",
-            // Collapsed + active: richer treatment since there's no label
-            // to carry the "active" signal. Ring + inner glow make it pop.
+            // Collapsed + active: the pill is a circle, so swap the linear
+            // gradient for a centered radial glow. Outer ring + soft halo
+            // make the icon feel illuminated rather than pressed.
+            "group-data-[collapsible=icon]:bg-[image:radial-gradient(circle_at_center,rgb(242_122_26_/_0.22)_0%,rgb(242_122_26_/_0.04)_80%)]",
             "group-data-[collapsible=icon]:ring-1",
             "group-data-[collapsible=icon]:ring-[var(--primary)]/35",
-            "group-data-[collapsible=icon]:shadow-[0_0_0_1px_rgb(242_122_26_/_0.15),0_0_14px_-4px_rgb(242_122_26_/_0.5)]",
+            "group-data-[collapsible=icon]:!shadow-[0_0_0_1px_rgb(242_122_26_/_0.18),0_0_16px_-4px_rgb(242_122_26_/_0.55)]",
           ],
         )}
       >
@@ -289,17 +317,14 @@ function AdminNavItem({
 }
 
 function NavBadge({ tone, count }: { tone: NavBadgeTone; count?: number }) {
-  const label = count === undefined ? "" : String(count);
-  const hasCount = label.length > 0;
+  // Only render when there's an actual count to show. Empty "dot" placeholders
+  // looked noisy on static nav items that haven't been data-wired yet.
+  // When the counters (pendingApprovals, overdueInvoices, expiringDocs, etc.)
+  // start returning real numbers, this renders the tinted count pill.
+  if (count === undefined || count <= 0) return null;
   return (
-    <SidebarMenuBadge
-      className={cn(
-        hasCount ? "px-1.5" : "h-2 w-2 min-w-0 !rounded-full p-0",
-        toneBg(tone),
-        hasCount && toneFg(tone),
-      )}
-    >
-      {label}
+    <SidebarMenuBadge className={cn("px-1.5", toneBg(tone), toneFg(tone))}>
+      {count}
     </SidebarMenuBadge>
   );
 }

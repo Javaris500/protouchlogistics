@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
   CalendarClock,
@@ -232,6 +232,7 @@ function DriversListPage() {
 /* -------------------------------------------------------------------------- */
 
 function DriversTable({ rows }: { rows: FixtureDriver[] }) {
+  const navigate = useNavigate();
   return (
     <Table>
       <TableHeader>
@@ -252,7 +253,16 @@ function DriversTable({ rows }: { rows: FixtureDriver[] }) {
           const expired = exp.days < 0;
           const soon = !expired && exp.days <= 30;
           return (
-            <TableRow key={d.id} className="cursor-pointer">
+            <TableRow
+              key={d.id}
+              className="cursor-pointer"
+              onClick={() =>
+                navigate({
+                  to: "/admin/drivers/$driverId",
+                  params: { driverId: d.id },
+                })
+              }
+            >
               <TableCell>
                 <div className="flex items-center gap-2.5">
                   <DriverAvatar first={d.firstName} last={d.lastName} />

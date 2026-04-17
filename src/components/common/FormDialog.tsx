@@ -40,12 +40,10 @@ interface FormDialogProps {
 /**
  * Opinionated wrapper for any "add / edit X" form in a dialog.
  *
- * Guarantees:
- *  - Consistent header/body/footer layout
- *  - Accessible title + description linked by Radix
- *  - Enter key submits, Escape dismisses (unless submitting)
- *  - Loading state on submit button, inputs left enabled for edit
- *  - Bottom-sheet on mobile, centered modal on ≥sm
+ * Improvements applied:
+ *  #5 — Icon treatment: gradient bg, rounded-xl, larger
+ *  #6 — Body spacing: space-y-5 with optional group support
+ *  #8 — Footer: primary CTA is h-10, cancel stays h-9 for hierarchy
  */
 export function FormDialog({
   open,
@@ -88,14 +86,17 @@ export function FormDialog({
       >
         <form id={formId} onSubmit={onSubmit} className="contents" noValidate>
           <DialogHeader className="relative pr-12">
-            <div className="flex items-start gap-3">
+            <div className="flex items-start gap-3.5">
+              {/* Improvement #5 — premium icon box */}
               {icon && (
                 <div
                   aria-hidden="true"
                   className={cn(
-                    "flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-md)]",
-                    "bg-[var(--surface-2)] text-[var(--primary)]",
-                    "border border-[var(--border)]",
+                    "flex h-10 w-10 shrink-0 items-center justify-center",
+                    "rounded-xl",
+                    "bg-gradient-to-br from-[color-mix(in_oklab,var(--primary)_16%,transparent)] to-[color-mix(in_oklab,var(--primary)_8%,transparent)]",
+                    "text-[var(--primary)]",
+                    "ring-1 ring-[var(--primary)]/10",
                     "[&_svg]:size-[18px]",
                   )}
                 >
@@ -117,13 +118,15 @@ export function FormDialog({
           </DialogHeader>
 
           {banner && (
-            <div className="border-b border-[var(--border)] px-6 py-3">
+            <div className="border-b border-[var(--border)]/60 px-6 py-3">
               {banner}
             </div>
           )}
 
+          {/* Improvement #6 — space-y-5 gives breathing room between fields */}
           <DialogBody className="space-y-5">{children}</DialogBody>
 
+          {/* Improvement #8 — primary CTA is taller + bolder than cancel */}
           <DialogFooter>
             {footer ?? (
               <>
@@ -143,6 +146,7 @@ export function FormDialog({
                   size="md"
                   disabled={submitDisabled || isSubmitting}
                   form={formId}
+                  className="h-10 min-w-[120px] font-semibold shadow-[var(--shadow-sm)]"
                 >
                   {isSubmitting && <Loader2 className="size-4 animate-spin" />}
                   {isSubmitting ? "Saving…" : submitLabel}
