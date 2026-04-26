@@ -5,7 +5,6 @@ import {
   Columns3,
   Download,
   List,
-  MapPin,
   PackagePlus,
   Plus,
   Truck,
@@ -39,6 +38,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { FIXTURE_LOADS, type FixtureLoad } from "@/lib/fixtures/loads";
 import { formatDateShort, formatMoneyCents } from "@/lib/format";
 
@@ -249,7 +249,7 @@ function LoadsListPage() {
             }}
             label="Filter by status"
           />
-          <div className="flex w-full items-center gap-2 md:w-auto">
+          <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
             <Select
               value={broker}
               onValueChange={(v) => {
@@ -257,7 +257,7 @@ function LoadsListPage() {
                 setPage(1);
               }}
             >
-              <SelectTrigger className="h-9 min-w-0 md:min-w-[160px]">
+              <SelectTrigger className="h-9 w-full min-w-0 md:w-auto md:min-w-[160px]">
                 <SelectValue placeholder="Broker" />
               </SelectTrigger>
               <SelectContent>
@@ -269,24 +269,26 @@ function LoadsListPage() {
                 ))}
               </SelectContent>
             </Select>
-            <div className="flex-1 md:w-72">
-              <SearchInput
-                value={search}
-                onValueChange={(v) => {
-                  setSearch(v);
-                  setPage(1);
-                }}
-                placeholder="Load #, ref, city, driver…"
+            <div className="flex items-center gap-2">
+              <div className="flex-1 md:w-72">
+                <SearchInput
+                  value={search}
+                  onValueChange={(v) => {
+                    setSearch(v);
+                    setPage(1);
+                  }}
+                  placeholder="Load #, ref, city, driver…"
+                />
+              </div>
+              <ViewSwitcher<ViewMode>
+                value={view}
+                onChange={setView}
+                options={[
+                  { value: "table", label: "Table", icon: List },
+                  { value: "board", label: "Board", icon: Columns3 },
+                ]}
               />
             </div>
-            <ViewSwitcher<ViewMode>
-              value={view}
-              onChange={setView}
-              options={[
-                { value: "table", label: "Table", icon: List },
-                { value: "board", label: "Board", icon: Columns3 },
-              ]}
-            />
           </div>
         </div>
 
@@ -294,12 +296,21 @@ function LoadsListPage() {
           <div className="p-6">
             <EmptyState
               icon={PackagePlus}
-              title="No loads match these filters"
-              description="Adjust the filters above or create a new load to get started."
+              variant={EMPTY_COPY["loads.filter"].variant}
+              title={EMPTY_COPY["loads.filter"].title}
+              description={EMPTY_COPY["loads.filter"].description}
               action={
-                <Button variant="primary" size="sm">
-                  <Plus className="size-4" />
-                  New load
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setStatus("all");
+                    setBroker("all");
+                    setSearch("");
+                    setPage(1);
+                  }}
+                >
+                  {EMPTY_COPY["loads.filter"].ctaLabel}
                 </Button>
               }
             />

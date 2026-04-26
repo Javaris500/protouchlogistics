@@ -9,7 +9,6 @@ import {
   Phone,
   Truck,
   UserPlus,
-  Wallet,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -32,11 +31,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import {
   FIXTURE_DRIVERS,
-  PAY_MODEL_LABEL,
   driverNextExpiration,
-  formatPayRate,
   formatPhone,
   type FixtureDriver,
 } from "@/lib/fixtures/drivers";
@@ -181,16 +179,20 @@ function DriversListPage() {
           <div className="p-6">
             <EmptyState
               icon={UserPlus}
-              title="No drivers match these filters"
-              description="Adjust the filters or invite a new driver to get started."
+              variant={EMPTY_COPY["drivers.filter"].variant}
+              title={EMPTY_COPY["drivers.filter"].title}
+              description={EMPTY_COPY["drivers.filter"].description}
               action={
                 <Button
-                  variant="primary"
+                  variant="outline"
                   size="sm"
-                  onClick={() => setInviteOpen(true)}
+                  onClick={() => {
+                    setFilter("all");
+                    setSearch("");
+                    setPage(1);
+                  }}
                 >
-                  <UserPlus className="size-4" />
-                  Invite driver
+                  {EMPTY_COPY["drivers.filter"].ctaLabel}
                 </Button>
               }
             />
@@ -242,7 +244,6 @@ function DriversTable({ rows }: { rows: FixtureDriver[] }) {
           <TableHead>Contact</TableHead>
           <TableHead>Location</TableHead>
           <TableHead>Truck</TableHead>
-          <TableHead>Pay</TableHead>
           <TableHead>Next expiration</TableHead>
           <TableHead className="text-right">Loads YTD</TableHead>
         </TableRow>
@@ -301,16 +302,6 @@ function DriversTable({ rows }: { rows: FixtureDriver[] }) {
                 ) : (
                   <span className="text-xs text-muted-foreground">—</span>
                 )}
-              </TableCell>
-              <TableCell>
-                <div className="flex flex-col">
-                  <span className="font-mono text-sm font-semibold tabular-nums">
-                    {formatPayRate(d)}
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {PAY_MODEL_LABEL[d.payModel]}
-                  </span>
-                </div>
               </TableCell>
               <TableCell>
                 <div
@@ -410,23 +401,11 @@ function DriverCard({ driver: d }: { driver: FixtureDriver }) {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 border-y border-border bg-muted/30 px-4 py-3">
-        <div className="space-y-0.5">
-          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--subtle-foreground)]">
-            <Wallet className="size-3" />
-            <span>Pay</span>
-          </div>
-          <div className="font-mono text-[15px] font-semibold tabular-nums">
-            {formatPayRate(d)}
-          </div>
-          <div className="text-[10px] text-muted-foreground">
-            {PAY_MODEL_LABEL[d.payModel]}
-          </div>
-        </div>
+      <div className="flex items-center justify-between gap-3 border-y border-border bg-muted/30 px-4 py-3">
         <div className="space-y-0.5">
           <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--subtle-foreground)]">
             <CalendarClock className="size-3" />
-            <span>{exp.label} exp.</span>
+            <span>{exp.label} expiration</span>
           </div>
           <div
             className={cn(

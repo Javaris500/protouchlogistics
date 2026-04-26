@@ -1,9 +1,11 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import * as React from "react";
 import {
   Building2,
   Calendar,
   Check,
   Clock,
+  DollarSign,
   FileCheck,
   FileText,
   MapPin,
@@ -15,12 +17,14 @@ import {
   Upload,
   User,
   UserPlus,
+  X,
   XCircle,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { toast } from "@/lib/toast";
 import { BackLink } from "@/components/common/BackLink";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -40,13 +44,19 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { StatusPill } from "@/components/ui/status-pill";
 import type { LoadStatus } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FixtureLoad } from "@/lib/fixtures/loads";
 import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
-import { formatDateShort, formatMoneyCents } from "@/lib/format";
+import {
+  formatDateShort,
+  formatMoneyCents,
+  formatRelativeFromNow,
+} from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/loads/$loadId")({
   loader: ({ params }) => {
@@ -59,12 +69,68 @@ export const Route = createFileRoute("/admin/loads/$loadId")({
 
 function LoadDetailPage() {
   const { load } = Route.useLoaderData();
-  const progress = loadStatusToProgress(load.status);
-  const primary = primaryActionFor(load.status);
+  // Pay is editable until the load is marked completed. We hold it in local
+  // state so the inline editor can optimistically reflect updates without a
+  // server round-trip (stubbed until backend lands).
+  const [status, setStatus] = React.useState<LoadStatus>(load.status);
+  const [driverPayCents, setDriverPayCents] = React.useState<number | null>(
+    load.driverPayCents,
+  );
+  const [driverPayUpdatedAt, setDriverPayUpdatedAt] = React.useState<
+    string | null
+  >(load.driverPayUpdatedAt);
+  const [confirmAssignOpen, setConfirmAssignOpen] = React.useState(false);
+  const [cancelLoadOpen, setCancelLoadOpen] = React.useState(false);
+  const payInputRef = React.useRef<HTMLInputElement>(null);
+  const payBlockRef = React.useRef<HTMLDivElement>(null);
+
+  const progress = loadStatusToProgress(status);
+  const primary = primaryActionFor(status);
   const ratePerMileCents =
     load.miles && load.miles > 0
       ? Math.round(load.rateCents / load.miles)
       : null;
+
+  const isCompleted = status === "completed";
+
+  const focusPayInput = () => {
+    payBlockRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "center",
+    });
+    window.setTimeout(() => payInputRef.current?.focus(), 200);
+  };
+
+  const finalizeAssign = () => {
+    // Stubbed — real assignment flow lands with the driver picker dialog.
+    toast.success(`Assigned — load ${load.loadNumber}`);
+  };
+
+  const handlePrimary = () => {
+    // Mark-complete is blocked if pay isn't recorded. Surface the pay editor
+    // with a toast + scroll so the admin knows what to fix.
+    if (primary.label === "Mark completed") {
+      if (driverPayCents === null) {
+        toast.error("Enter driver pay before closing this load");
+        focusPayInput();
+        return;
+      }
+      setStatus("completed");
+      toast.success(`Load ${load.loadNumber} marked completed`);
+      return;
+    }
+    // Assigning a driver while pay is blank: soft-warn, same as LoadNew flow.
+    if (primary.label === "Assign driver" && driverPayCents === null) {
+      setConfirmAssignOpen(true);
+      return;
+    }
+    toast.success(`${primary.label} — load ${load.loadNumber}`);
+  };
+
+  const handlePaySave = (nextCents: number | null) => {
+    setDriverPayCents(nextCents);
+    setDriverPayUpdatedAt(new Date().toISOString());
+  };
 
   return (
     <div className="flex flex-col gap-5">
@@ -77,7 +143,7 @@ function LoadDetailPage() {
           title={
             <span className="inline-flex flex-wrap items-center gap-3">
               <span className="font-mono">{load.loadNumber}</span>
-              <StatusPill kind="load" status={load.status} />
+              <StatusPill kind="load" status={status} />
             </span>
           }
           description={
@@ -103,9 +169,7 @@ function LoadDetailPage() {
               <Button
                 variant={primary.variant}
                 size="md"
-                onClick={() =>
-                  toast.success(`${primary.label} — load ${load.loadNumber}`)
-                }
+                onClick={handlePrimary}
               >
                 <primary.icon className="size-4" />
                 {primary.label}
@@ -139,13 +203,7 @@ function LoadDetailPage() {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="danger"
-                    onSelect={() => {
-                      const reason = window.prompt(
-                        `Cancel load ${load.loadNumber}? Enter a reason (visible to the broker):`,
-                      );
-                      if (!reason) return;
-                      toast.success(`Load ${load.loadNumber} cancelled`);
-                    }}
+                    onSelect={() => setCancelLoadOpen(true)}
                   >
                     <XCircle /> Cancel load
                   </DropdownMenuItem>
@@ -180,6 +238,16 @@ function LoadDetailPage() {
               sublabel: ratePerMileCents ? undefined : "miles required",
             },
           ]}
+        />
+
+        <DriverPayBlock
+          ref={payBlockRef}
+          inputRef={payInputRef}
+          payCents={driverPayCents}
+          payUpdatedAt={driverPayUpdatedAt}
+          createdAt={load.createdAt}
+          readOnly={isCompleted}
+          onSave={handlePaySave}
         />
 
         <Card className="p-4 sm:p-5">
@@ -318,16 +386,222 @@ function LoadDetailPage() {
             </div>
             <p className="text-sm font-medium">Breadcrumb map</p>
             <p className="max-w-sm text-center text-xs text-muted-foreground">
-              {load.status === "draft" || load.status === "assigned"
+              {status === "draft" || status === "assigned"
                 ? "Tracking starts once the driver goes en route to pickup."
                 : "Full breadcrumb trail for this load appears once GPS data is recorded. Wires to Mapbox."}
             </p>
           </Card>
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={confirmAssignOpen}
+        onOpenChange={setConfirmAssignOpen}
+        tone="warning"
+        title="Driver pay isn't set yet"
+        description="You can continue assigning — but the load won't be markable completed until driver pay is recorded."
+        body="Enter pay now while the rate con details are fresh."
+        confirmLabel="Continue anyway"
+        confirmVariant="primary"
+        cancelLabel="Set pay first"
+        onCancel={focusPayInput}
+        onConfirm={() => {
+          setConfirmAssignOpen(false);
+          finalizeAssign();
+        }}
+      />
+
+      <ConfirmDialog
+        open={cancelLoadOpen}
+        onOpenChange={setCancelLoadOpen}
+        tone="danger"
+        title={`Cancel load ${load.loadNumber}?`}
+        description="The broker sees this reason. The load is removed from the driver's board and status is set to cancelled."
+        confirmLabel="Cancel load"
+        input={{
+          label: "Reason for cancellation",
+          placeholder: "e.g. Broker double-booked, equipment mismatch…",
+          multiline: true,
+          rows: 3,
+          required: true,
+        }}
+        onConfirm={(reason) => {
+          toast.success(`Load ${load.loadNumber} cancelled`);
+          setCancelLoadOpen(false);
+          // reason is captured for the server function call when backend is wired
+          void reason;
+        }}
+      />
     </div>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Driver pay block — prominent display + inline edit                        */
+/* -------------------------------------------------------------------------- */
+
+interface DriverPayBlockProps {
+  inputRef: React.RefObject<HTMLInputElement | null>;
+  payCents: number | null;
+  payUpdatedAt: string | null;
+  createdAt: string;
+  readOnly: boolean;
+  onSave: (nextCents: number | null) => void;
+}
+
+const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
+  function DriverPayBlock(
+    { inputRef, payCents, payUpdatedAt, createdAt, readOnly, onSave },
+    ref,
+  ) {
+    const [editing, setEditing] = React.useState(false);
+    const [draft, setDraft] = React.useState(() =>
+      payCents === null ? "" : (payCents / 100).toFixed(2),
+    );
+
+    // Keep draft in sync when external pay changes (e.g. after save).
+    React.useEffect(() => {
+      setDraft(payCents === null ? "" : (payCents / 100).toFixed(2));
+    }, [payCents]);
+
+    const startEdit = () => {
+      if (readOnly) return;
+      setEditing(true);
+      window.setTimeout(() => {
+        inputRef.current?.focus();
+        inputRef.current?.select();
+      }, 20);
+    };
+
+    const commit = () => {
+      const trimmed = draft.trim();
+      const next =
+        trimmed === ""
+          ? null
+          : Math.round(Number.parseFloat(trimmed) * 100);
+      if (next !== null && (Number.isNaN(next) || next < 0)) {
+        toast.error("Enter a non-negative dollar amount");
+        return;
+      }
+      onSave(next);
+      setEditing(false);
+      toast.success("Driver pay updated");
+    };
+
+    const cancel = () => {
+      setDraft(payCents === null ? "" : (payCents / 100).toFixed(2));
+      setEditing(false);
+    };
+
+    const showUpdatedMeta =
+      payUpdatedAt !== null && payUpdatedAt !== createdAt;
+
+    return (
+      <Card
+        ref={ref}
+        className={cn(
+          "flex flex-col gap-3 p-5 sm:p-6",
+          payCents === null &&
+            !readOnly &&
+            "border-[var(--warning)]/40 bg-[color-mix(in_oklab,var(--warning)_4%,var(--background))]",
+        )}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-[color-mix(in_oklab,var(--primary)_12%,transparent)] text-[var(--primary)] ring-1 ring-[var(--primary)]/15">
+              <DollarSign className="size-[18px]" />
+            </div>
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                Driver pay
+              </span>
+              {editing && !readOnly ? (
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
+                      $
+                    </span>
+                    <Input
+                      ref={inputRef}
+                      type="number"
+                      inputMode="decimal"
+                      step="0.01"
+                      min="0"
+                      placeholder="0.00"
+                      className="w-36 pl-7 font-mono tabular-nums"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          commit();
+                        } else if (e.key === "Escape") {
+                          e.preventDefault();
+                          cancel();
+                        }
+                      }}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    size="sm"
+                    onClick={commit}
+                  >
+                    <Check className="size-3.5" />
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={cancel}
+                  >
+                    <X className="size-3.5" />
+                  </Button>
+                </div>
+              ) : payCents === null ? (
+                <span className="font-mono text-2xl font-bold text-muted-foreground">
+                  Not set
+                </span>
+              ) : (
+                <span className="font-mono text-2xl font-bold tabular-nums">
+                  {formatMoneyCents(payCents, true)}
+                </span>
+              )}
+              {showUpdatedMeta && !editing && (
+                <span className="text-[11px] text-muted-foreground">
+                  Updated {formatRelativeFromNow(payUpdatedAt)}
+                </span>
+              )}
+            </div>
+          </div>
+          {!editing && !readOnly && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={startEdit}
+            >
+              <Pencil className="size-3.5" />
+              {payCents === null ? "Add pay" : "Edit"}
+            </Button>
+          )}
+          {readOnly && (
+            <Badge variant="muted" className="text-[10px]">
+              Locked — load completed
+            </Badge>
+          )}
+        </div>
+        {payCents === null && !readOnly && !editing && (
+          <p className="text-xs text-muted-foreground">
+            Required before this load can be marked completed.
+          </p>
+        )}
+      </Card>
+    );
+  },
+);
 
 /* -------------------------------------------------------------------------- */
 /*  Route band — cities + arrow + miles                                       */

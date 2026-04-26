@@ -1169,7 +1169,7 @@ Below is every server function in Phase 1 with input/output schemas. Names are `
 
 | Function | Middleware | Input | Output |
 |---|---|---|---|
-| `inviteDriver` | adminOnly, audit | `{ email, hireDate, payModel, payRate }` | `{ invite }` |
+| `inviteDriver` | adminOnly, audit | `{ email, hireDate }` | `{ invite }` |
 | `listPendingApprovals` | adminOnly | `PaginationSchema` | `{ drivers[], nextCursor }` |
 | `approveDriver` | adminOnly, audit | `{ driverId }` | `{ driver }` |
 | `rejectDriver` | adminOnly, audit | `{ driverId, reason }` | `{ driver }` |
@@ -1214,11 +1214,27 @@ Below is every server function in Phase 1 with input/output schemas. Names are `
 | `getLoadAdmin` | adminOnly | `{ loadId }` | `{ load, stops, history, documents, breadcrumbs? }` |
 | `getLoadDriver` | driverOnly | `{ loadId }` | `{ load, stops, documents }` (stripped) |
 | `updateLoad` | adminOnly, audit | partial `LoadSchema` | `{ load }` |
+| `updateLoadDriverPay` | adminOnly, audit | `{ loadId, driverPayCents }` | `{ load }` |
 | `assignLoad` | adminOnly, audit | `AssignLoadInputSchema` | `{ load }` |
 | `unassignLoad` | adminOnly, audit | `{ loadId, reason }` | `{ load }` |
 | `updateLoadStatus` | auth, audit | `UpdateLoadStatusInputSchema` | `{ load, history }` |
 | `cancelLoad` | adminOnly, audit | `{ loadId, reason }` | `{ load }` |
 | `deleteLoad` | adminOnly, audit | `{ loadId }` | `{ ok }` (soft delete, only if draft) |
+
+**`loads` table adds (phase 1 pay contract):**
+- `driverPayCents: int | null` — admin-editable; required to close a load.
+- `driverPayUpdatedAt: timestamptz | null` — stamped on every change to `driverPayCents` after creation.
+
+**`driver_profiles` table changes:** `payModel` and `payRate` are removed. Per-load pay replaces per-driver pay defaults. Onboarding no longer collects pay.
+
+**`updateLoadDriverPay` contract:**
+- Admin-only. Rejects with `ForbiddenError` when `load.status === 'completed'` — pay is locked after close. Validates `driverPayCents >= 0` (non-negative integer) or `null`. On any change to the stored value, stamps `driverPayUpdatedAt = now()` and fires a `pay_changed` notification to the assigned driver (no-op when unassigned or when the value did not change).
+
+**`updateLoadStatus` note — completion gate:** the transition to `status = 'completed'` MUST assert `load.driverPayCents != null`. When null, throw `BusinessRuleError("driver pay required before close")` (mapped to a toast by the error normalizer). This replaces the old "snapshot pay at completion" behavior — pay is captured at edit time, not at close.
+
+**`getLoadDriver` response note:** the driver-scoped payload includes `driverPayCents` and `driverPayUpdatedAt` alongside `load`/`stops`/`documents` so the driver app can render the pay figure and "Updated Xh ago" meta. Broker, rate, and admin-only fields remain stripped per §6.1.
+
+**Pay read-model (replaces `driver_pay_records`):** `driver_pay_records` as a separate snapshot table is retired. Per-period driver pay is computed from `loads.driverPayCents` grouped by `assignedDriverId` and completion date — either as a Postgres view (`driver_pay_period_view`) or an in-service query helper (`payService.aggregateForDriver({ driverId, periodStart, periodEnd })`). `getMyPay` and `listPayRecordsAdmin` (see §9.9) now read from this aggregate; adjustments live on the load, not on a separate row.
 
 ### 9.6 Documents
 
@@ -1270,6 +1286,24 @@ Below is every server function in Phase 1 with input/output schemas. Names are `
 | `listMyNotifications` | auth | `{ onlyUnread?, limit? }` | `{ notifications[], unreadCount }` |
 | `markNotificationRead` | auth | `{ notificationId }` | `{ notification }` |
 | `markAllNotificationsRead` | auth | — | `{ updatedCount }` |
+
+**Notification type enum:**
+
+```ts
+export type NotificationType =
+  | "doc_expiring"
+  | "doc_expired"
+  | "load_assigned"
+  | "load_status_changed"
+  | "load_delivered"
+  | "driver_onboarding"
+  | "invoice_paid"
+  | "invoice_overdue"
+  | "pay_changed"
+  | "system";
+```
+
+`pay_changed` fires from `updateLoadDriverPay` (see §9.5) whenever `load.driverPayCents` is mutated post-creation, targeting the assigned driver. Payload metadata includes `loadId`, prior `driverPayCents`, and new `driverPayCents`.
 
 ### 9.11 Dashboards
 
@@ -1789,6 +1823,7 @@ async function autoCompleteLoads() {
       eq(loads.status, "pod_uploaded"),
       lt(loads.updatedAt, cutoff),
       isNull(loads.deletedAt),
+      isNotNull(loads.driverPayCents), // completion gate: see §9.5 updateLoadStatus
     ),
     with: { assignedDriver: true },
   });
@@ -1805,10 +1840,11 @@ async function autoCompleteLoads() {
         reason: "Auto-completed after 24 hours in pod_uploaded status",
       });
 
-      // Snapshot driver pay
-      if (load.assignedDriverId) {
-        await payService.createPayRecord(load, tx);
-      }
+      // Pay is already captured on the load (loads.driverPayCents). No
+      // snapshot row needed — driver_pay_records has been retired in favor
+      // of the per-load pay field + aggregation view. Auto-complete assumes
+      // driverPayCents is already set; jobs must skip loads where it is
+      // null rather than fabricate a zero.
     });
 
     await notificationsService.notify({

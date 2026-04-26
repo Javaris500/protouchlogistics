@@ -28,6 +28,11 @@ export interface FixtureLoad {
   broker: { id: string; companyName: string };
   driver: { id: string; firstName: string; lastName: string } | null;
   truck: { id: string; unitNumber: string } | null;
+  /** Admin-set driver payout in cents. Null until entered. Required to mark load completed. */
+  driverPayCents: number | null;
+  /** ISO timestamp of last driverPayCents edit. Null if never edited post-create. */
+  driverPayUpdatedAt: string | null;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -67,6 +72,9 @@ export const FIXTURE_LOADS: FixtureLoad[] = [
     broker: { id: "br_01", companyName: "CH Robinson" },
     driver: { id: "dr_01", firstName: "Jordan", lastName: "Reeves" },
     truck: { id: "tr_01", unitNumber: "101" },
+    driverPayCents: 71_250,
+    driverPayUpdatedAt: d(-1, 9),
+    createdAt: d(-2, 10),
     updatedAt: d(0, 2),
   },
   {
@@ -84,6 +92,9 @@ export const FIXTURE_LOADS: FixtureLoad[] = [
     broker: { id: "br_02", companyName: "Total Quality Logistics" },
     driver: { id: "dr_02", firstName: "Marcus", lastName: "Holloway" },
     truck: { id: "tr_02", unitNumber: "T-205" },
+    driverPayCents: 49_500,
+    driverPayUpdatedAt: d(0, 8),
+    createdAt: d(0, 8),
     updatedAt: d(0, 9),
   },
   {
@@ -96,11 +107,15 @@ export const FIXTURE_LOADS: FixtureLoad[] = [
     weight: 42_100,
     pieces: 30,
     referenceNumber: "XPO-552201",
-    pickup: stop("Omaha", "NE", 1, 6),
+    pickup: stop("Phoenix", "AZ", 1, 6),
     delivery: stop("Denver", "CO", 2, 14),
     broker: { id: "br_03", companyName: "XPO Logistics" },
-    driver: { id: "dr_03", firstName: "Terrell", lastName: "Mason" },
-    truck: { id: "tr_03", unitNumber: "T-301" },
+    driver: { id: "dr_03", firstName: "Sara", lastName: "Chen" },
+    truck: { id: "tr_03", unitNumber: "308" },
+    // Assigned but pay not yet set — exercises the soft-warning dialog + empty-pay UI.
+    driverPayCents: null,
+    driverPayUpdatedAt: null,
+    createdAt: d(-1, 16),
     updatedAt: d(-1, 16),
   },
   {
@@ -118,6 +133,9 @@ export const FIXTURE_LOADS: FixtureLoad[] = [
     broker: { id: "br_01", companyName: "CH Robinson" },
     driver: { id: "dr_01", firstName: "Jordan", lastName: "Reeves" },
     truck: { id: "tr_01", unitNumber: "101" },
+    driverPayCents: 56_250,
+    driverPayUpdatedAt: d(-3, 15),
+    createdAt: d(-5, 11),
     updatedAt: d(-3, 15),
   },
   {
@@ -135,57 +153,9 @@ export const FIXTURE_LOADS: FixtureLoad[] = [
     broker: { id: "br_02", companyName: "Total Quality Logistics" },
     driver: { id: "dr_02", firstName: "Marcus", lastName: "Holloway" },
     truck: { id: "tr_02", unitNumber: "T-205" },
+    driverPayCents: 44_625,
+    driverPayUpdatedAt: d(-1, 12),
+    createdAt: d(-3, 9),
     updatedAt: d(-1, 13),
-  },
-  {
-    id: "ld_06",
-    loadNumber: "PTL-2026-0137",
-    status: "draft",
-    rateCents: 320_000,
-    miles: null,
-    commodity: "Retail goods",
-    weight: null,
-    pieces: null,
-    referenceNumber: null,
-    pickup: stop("Tulsa", "OK", 3, 8),
-    delivery: stop("Phoenix", "AZ", 4, 10),
-    broker: { id: "br_04", companyName: "Landstar System" },
-    driver: null,
-    truck: null,
-    updatedAt: d(0, 8),
-  },
-  {
-    id: "ld_07",
-    loadNumber: "PTL-2026-0136",
-    status: "cancelled",
-    rateCents: 150_000,
-    miles: 220,
-    commodity: "Beverages",
-    weight: 26_400,
-    pieces: 12,
-    referenceNumber: "XPO-551998",
-    pickup: stop("Springfield", "MO", -5, 8),
-    delivery: stop("Tulsa", "OK", -4, 14),
-    broker: { id: "br_03", companyName: "XPO Logistics" },
-    driver: null,
-    truck: null,
-    updatedAt: d(-4, 18),
-  },
-  {
-    id: "ld_08",
-    loadNumber: "PTL-2026-0135",
-    status: "accepted",
-    rateCents: 264_750,
-    miles: 520,
-    commodity: "Lumber",
-    weight: 39_800,
-    pieces: 8,
-    referenceNumber: "CH-881856",
-    pickup: stop("Little Rock", "AR", 2, 7),
-    delivery: stop("Houston", "TX", 3, 13),
-    broker: { id: "br_01", companyName: "CH Robinson" },
-    driver: { id: "dr_04", firstName: "Devon", lastName: "Walker" },
-    truck: { id: "tr_04", unitNumber: "T-402" },
-    updatedAt: d(0, 6),
   },
 ];

@@ -5,8 +5,6 @@
 
 import type { DriverStatus } from "@/components/ui/status-pill";
 
-export type PayModel = "percent_of_rate" | "per_mile" | "flat_per_load";
-
 export interface FixtureDriver {
   id: string;
   firstName: string;
@@ -22,9 +20,6 @@ export interface FixtureDriver {
   cdlState: string;
   cdlExpiration: string;
   medicalExpiration: string;
-  payModel: PayModel;
-  /** Basis points (percent_of_rate), cents/mile (per_mile), or cents (flat_per_load). */
-  payRate: number;
   assignedTruck: { id: string; unitNumber: string } | null;
   loadsThisYear: number;
   updatedAt: string;
@@ -53,8 +48,6 @@ export const FIXTURE_DRIVERS: FixtureDriver[] = [
     cdlState: "MO",
     cdlExpiration: plusDays(420),
     medicalExpiration: plusDays(330),
-    payModel: "percent_of_rate",
-    payRate: 2500, // 25.00%
     assignedTruck: { id: "tr_01", unitNumber: "101" },
     loadsThisYear: 42,
     updatedAt: plusDays(0),
@@ -72,10 +65,9 @@ export const FIXTURE_DRIVERS: FixtureDriver[] = [
     cdlNumber: "TX-M4412-H08",
     cdlClass: "A",
     cdlState: "TX",
-    cdlExpiration: plusDays(68), // expiring soon
+    // CDL expiring within 90 days — exercises expiring-soon UI.
+    cdlExpiration: plusDays(68),
     medicalExpiration: plusDays(280),
-    payModel: "per_mile",
-    payRate: 55, // 55¢/mile
     assignedTruck: { id: "tr_02", unitNumber: "T-205" },
     loadsThisYear: 58,
     updatedAt: plusDays(-1),
@@ -94,94 +86,13 @@ export const FIXTURE_DRIVERS: FixtureDriver[] = [
     cdlClass: "A",
     cdlState: "AZ",
     cdlExpiration: plusDays(620),
-    medicalExpiration: plusDays(24), // expiring very soon
-    payModel: "flat_per_load",
-    payRate: 55000, // $550/load
+    // Medical expiring very soon — exercises urgent warning styling.
+    medicalExpiration: plusDays(24),
     assignedTruck: { id: "tr_03", unitNumber: "308" },
     loadsThisYear: 31,
     updatedAt: plusDays(-2),
   },
-  {
-    id: "dr_04",
-    firstName: "Tyrone",
-    lastName: "Hill",
-    email: "tyrone.hill@protouch.co",
-    phone: "+19015550189",
-    city: "Memphis",
-    state: "TN",
-    status: "pending_approval",
-    hireDate: null,
-    cdlNumber: "TN-H9912-T05",
-    cdlClass: "A",
-    cdlState: "TN",
-    cdlExpiration: plusDays(580),
-    medicalExpiration: plusDays(410),
-    payModel: "percent_of_rate",
-    payRate: 2500,
-    assignedTruck: null,
-    loadsThisYear: 0,
-    updatedAt: plusDays(-1),
-  },
-  {
-    id: "dr_05",
-    firstName: "Dave",
-    lastName: "Gonzalez",
-    email: "dave.gonzalez@protouch.co",
-    phone: "+12105550212",
-    city: "San Antonio",
-    state: "TX",
-    status: "suspended",
-    hireDate: "2021-06-30",
-    cdlNumber: "TX-G3301-D12",
-    cdlClass: "A",
-    cdlState: "TX",
-    cdlExpiration: plusDays(-14), // expired
-    medicalExpiration: plusDays(-60), // expired
-    payModel: "per_mile",
-    payRate: 50,
-    assignedTruck: null,
-    loadsThisYear: 12,
-    updatedAt: plusDays(-30),
-  },
-  {
-    id: "dr_06",
-    firstName: "Alicia",
-    lastName: "Knox",
-    email: "alicia.knox@protouch.co",
-    phone: "+14045550284",
-    city: "Atlanta",
-    state: "GA",
-    status: "invited",
-    hireDate: null,
-    cdlNumber: "",
-    cdlClass: "A",
-    cdlState: "GA",
-    cdlExpiration: plusDays(365),
-    medicalExpiration: plusDays(365),
-    payModel: "percent_of_rate",
-    payRate: 2500,
-    assignedTruck: null,
-    loadsThisYear: 0,
-    updatedAt: plusDays(-3),
-  },
 ];
-
-export const PAY_MODEL_LABEL: Record<PayModel, string> = {
-  percent_of_rate: "% of rate",
-  per_mile: "Per mile",
-  flat_per_load: "Flat / load",
-};
-
-export function formatPayRate(d: FixtureDriver): string {
-  switch (d.payModel) {
-    case "percent_of_rate":
-      return `${(d.payRate / 100).toFixed(1)}%`;
-    case "per_mile":
-      return `$${(d.payRate / 100).toFixed(2)}/mi`;
-    case "flat_per_load":
-      return `$${(d.payRate / 100).toLocaleString("en-US", { maximumFractionDigits: 0 })}/load`;
-  }
-}
 
 /** Days until the nearest-expiring compliance doc. Negative = expired. */
 export function driverNextExpiration(

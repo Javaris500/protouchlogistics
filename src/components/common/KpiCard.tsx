@@ -9,13 +9,15 @@ interface KpiCardProps {
   value: ReactNode;
   sublabel?: string;
   icon?: ReactNode;
-  trend?: {
-    direction: "up" | "down" | "flat";
-    value: string;
-    /** When true, "up" is green / "down" is red. When false, inverted (e.g. outstanding AR). */
-    positiveIsGood?: boolean;
-  };
+  trend?: Trend | null;
   className?: string;
+}
+
+export interface Trend {
+  direction: "up" | "down" | "flat";
+  value: string;
+  /** When true, "up" is green / "down" is red. When false, inverted (e.g. outstanding AR). */
+  positiveIsGood?: boolean;
 }
 
 export function KpiCard({
@@ -53,7 +55,7 @@ export function KpiCard({
   );
 }
 
-function TrendPill({ trend }: { trend: NonNullable<KpiCardProps["trend"]> }) {
+function TrendPill({ trend }: { trend: Trend }) {
   const positiveIsGood = trend.positiveIsGood ?? true;
   const isGood =
     trend.direction === "flat"

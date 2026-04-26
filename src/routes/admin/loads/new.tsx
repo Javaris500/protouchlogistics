@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { FormField } from "@/components/common/FormField";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Section } from "@/components/common/Section";
@@ -60,6 +61,7 @@ interface LoadDraft {
   pieces: string;
   rateDollars: string;
   miles: string;
+  driverPayDollars: string;
   specialInstructions: string;
   assignedDriverId: string;
   assignedTruckId: string;
@@ -89,6 +91,7 @@ const INITIAL: LoadDraft = {
   pieces: "",
   rateDollars: "",
   miles: "",
+  driverPayDollars: "",
   specialInstructions: "",
   assignedDriverId: "",
   assignedTruckId: "",
@@ -102,6 +105,7 @@ type Errors = Partial<
     | "commodity"
     | "rateDollars"
     | "miles"
+    | "driverPayDollars"
     | "pickup.line1"
     | "pickup.city"
     | "pickup.state"
@@ -127,6 +131,8 @@ function NewLoadPage() {
   const [form, setForm] = React.useState<LoadDraft>(INITIAL);
   const [errors, setErrors] = React.useState<Errors>({});
   const [submitting, setSubmitting] = React.useState(false);
+  const [confirmPayOpen, setConfirmPayOpen] = React.useState(false);
+  const payInputRef = React.useRef<HTMLInputElement>(null);
 
   // Dedup brokers from fixture loads (no separate broker fixture yet).
   const brokers = React.useMemo(() => {
@@ -162,8 +168,6 @@ function NewLoadPage() {
     }
   }, [form.assignedDriverId]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isPerMile = selectedDriver?.payModel === "per_mile";
-
   /* ----- helpers ----- */
 
   const set = <K extends keyof LoadDraft>(key: K, value: LoadDraft[K]) =>
@@ -182,10 +186,10 @@ function NewLoadPage() {
     if (!form.rateDollars || Number.isNaN(rate) || rate <= 0)
       e.rateDollars = "Enter the rate in dollars";
 
-    if (isPerMile) {
-      const miles = Number(form.miles);
-      if (!form.miles || Number.isNaN(miles) || miles <= 0)
-        e.miles = "Miles required — assigned driver is paid per mile";
+    if (form.driverPayDollars.trim() !== "") {
+      const pay = Number(form.driverPayDollars);
+      if (Number.isNaN(pay) || pay < 0)
+        e.driverPayDollars = "Enter a non-negative dollar amount";
     }
 
     for (const which of ["pickup", "delivery"] as const) {
@@ -216,6 +220,28 @@ function NewLoadPage() {
     return e;
   };
 
+  const driverAssignedWithoutPay =
+    !!form.assignedDriverId && form.driverPayDollars.trim() === "";
+
+  const finalizeSubmit = () => {
+    setSubmitting(true);
+    const payCents =
+      form.driverPayDollars.trim() === ""
+        ? null
+        : Math.round(Number(form.driverPayDollars) * 100);
+    // Stubbed submit — replace with createLoad server function.
+    // eslint-disable-next-line no-console
+    console.info("[createLoad:stub]", {
+      ...form,
+      rateCents: Math.round(Number(form.rateDollars) * 100),
+      driverPayCents: payCents,
+      status: form.assignedDriverId ? "assigned" : "draft",
+    });
+    window.setTimeout(() => {
+      navigate({ to: "/admin/loads" });
+    }, 600);
+  };
+
   const handleSubmit = (ev: React.FormEvent) => {
     ev.preventDefault();
     const v = validate();
@@ -229,17 +255,14 @@ function NewLoadPage() {
       return;
     }
 
-    setSubmitting(true);
-    // Stubbed submit — replace with createLoad server function.
-    // eslint-disable-next-line no-console
-    console.info("[createLoad:stub]", {
-      ...form,
-      rateCents: Math.round(Number(form.rateDollars) * 100),
-      status: form.assignedDriverId ? "assigned" : "draft",
-    });
-    window.setTimeout(() => {
-      navigate({ to: "/admin/loads" });
-    }, 600);
+    // Soft warning: driver assigned but pay still blank. Give admin a chance
+    // to fill it in now rather than having to come back later.
+    if (driverAssignedWithoutPay) {
+      setConfirmPayOpen(true);
+      return;
+    }
+
+    finalizeSubmit();
   };
 
   const canAssign = !!form.assignedDriverId;
@@ -386,12 +409,7 @@ function NewLoadPage() {
           <FormField
             label="Miles"
             error={errors.miles}
-            hint={
-              isPerMile
-                ? "Required — driver is paid per mile"
-                : "Optional unless per-mile driver"
-            }
-            required={isPerMile}
+            hint="Optional — used to compute rate per mile"
           >
             <Input
               data-field="miles"
@@ -401,6 +419,29 @@ function NewLoadPage() {
               value={form.miles}
               onChange={(e) => set("miles", e.target.value)}
             />
+          </FormField>
+          <FormField
+            label="Driver pay"
+            error={errors.driverPayDollars}
+            hint="Optional. Required before load can be marked completed."
+          >
+            <div className="relative">
+              <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">
+                $
+              </span>
+              <Input
+                ref={payInputRef}
+                data-field="driverPayDollars"
+                type="number"
+                inputMode="decimal"
+                step="0.01"
+                min="0"
+                placeholder="650"
+                className="pl-7 font-mono tabular-nums"
+                value={form.driverPayDollars}
+                onChange={(e) => set("driverPayDollars", e.target.value)}
+              />
+            </div>
           </FormField>
         </div>
       </Section>
@@ -422,7 +463,7 @@ function NewLoadPage() {
             }
             hint={
               selectedDriver
-                ? `${selectedDriver.city}, ${selectedDriver.state} · ${selectedDriver.payModel === "percent_of_rate" ? `${(selectedDriver.payRate / 100).toFixed(1)}%` : selectedDriver.payModel === "per_mile" ? `$${(selectedDriver.payRate / 100).toFixed(2)}/mi` : `$${(selectedDriver.payRate / 100).toFixed(0)}/load`}`
+                ? `${selectedDriver.city}, ${selectedDriver.state}`
                 : "Only active drivers listed"
             }
           >
@@ -573,6 +614,33 @@ function NewLoadPage() {
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmPayOpen}
+        onOpenChange={setConfirmPayOpen}
+        tone="warning"
+        title="Driver pay isn't set yet"
+        description="You're assigning this load to a driver but haven't entered their pay. You can continue and set it later — but the load can't be marked completed until pay is recorded."
+        body="Tip: enter pay now while the rate con details are fresh."
+        confirmLabel="Continue anyway"
+        confirmVariant="primary"
+        cancelLabel="Set pay first"
+        isSubmitting={submitting}
+        onCancel={() => {
+          // Return focus to pay input so the admin can fill it in.
+          window.setTimeout(() => {
+            payInputRef.current?.focus();
+            payInputRef.current?.scrollIntoView({
+              behavior: "smooth",
+              block: "center",
+            });
+          }, 50);
+        }}
+        onConfirm={() => {
+          setConfirmPayOpen(false);
+          finalizeSubmit();
+        }}
+      />
     </form>
   );
 }

@@ -308,7 +308,9 @@ function AdminNavItem({
                 : "text-[var(--sidebar-muted)] group-hover/nav-item:text-[var(--sidebar-foreground)]",
             )}
           />
-          <span>{item.label}</span>
+          <span className="group-data-[collapsible=icon]:hidden">
+            {item.label}
+          </span>
         </Link>
       </SidebarMenuButton>
       {item.badge && <NavBadge tone={item.badge.tone} />}

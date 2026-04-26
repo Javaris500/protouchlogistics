@@ -6,6 +6,7 @@ import {
   CircleDollarSign,
   ExternalLink,
   FileWarning,
+  History,
   MapPin,
   Truck,
   UserPlus,
@@ -18,6 +19,7 @@ import { Section } from "@/components/common/Section";
 import { Button } from "@/components/ui/button";
 import { ExpirationBadge } from "@/components/ui/expiration-badge";
 import { StatusPill } from "@/components/ui/status-pill";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import {
   FIXTURE_ACTIVE_LOADS,
   FIXTURE_ACTIVITY,
@@ -116,13 +118,15 @@ function KpiRow() {
         value={formatCompactCents(k.invoicesOutstandingCents)}
         sublabel="unpaid invoices"
         icon={<CircleDollarSign />}
-        trend={{ ...k.trends.invoicesOutstandingCents, positiveIsGood: false }}
+        trend={k.trends.invoicesOutstandingCents}
       />
     </div>
   );
 }
 
 function LiveMapPreview({ className }: { className?: string }) {
+  const copy = EMPTY_COPY["dashboard.liveFleet"];
+  const hasDrivers = FIXTURE_KPIS.driversOnRoadNow > 0;
   return (
     <Section
       title="Live fleet"
@@ -139,7 +143,6 @@ function LiveMapPreview({ className }: { className?: string }) {
       className={className}
     >
       <div className="relative aspect-[16/9] w-full overflow-hidden rounded-b-xl bg-muted">
-        {/* Map placeholder — replace with Mapbox LiveFleetMap once wired. */}
         <div
           aria-hidden="true"
           className="absolute inset-0"
@@ -155,12 +158,23 @@ function LiveMapPreview({ className }: { className?: string }) {
           <div className="flex size-10 items-center justify-center rounded-full bg-background shadow-sm">
             <MapPin className="size-5 text-[var(--primary)]" aria-hidden />
           </div>
-          <div className="text-sm font-semibold">
-            {FIXTURE_KPIS.driversOnRoadNow} drivers reporting
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Live map loads once Mapbox is wired.
-          </div>
+          {hasDrivers ? (
+            <>
+              <div className="text-sm font-semibold">
+                {FIXTURE_KPIS.driversOnRoadNow} drivers reporting
+              </div>
+              <div className="text-xs text-muted-foreground">
+                Live map loads once Mapbox is wired.
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="text-sm font-semibold">{copy.title}</div>
+              <div className="max-w-sm text-xs text-muted-foreground">
+                {copy.description}
+              </div>
+            </>
+          )}
         </div>
       </div>
     </Section>
@@ -169,6 +183,7 @@ function LiveMapPreview({ className }: { className?: string }) {
 
 function OnboardingQueueCard({ className }: { className?: string }) {
   const count = FIXTURE_PENDING_ONBOARDING_COUNT;
+  const copy = EMPTY_COPY["dashboard.onboardingQueue"];
   return (
     <Section
       title="Onboarding queue"
@@ -177,12 +192,15 @@ function OnboardingQueueCard({ className }: { className?: string }) {
     >
       {count === 0 ? (
         <EmptyState
+          variant={copy.variant}
           icon={UserPlus}
-          title="No pending approvals"
-          description="Invite a driver to start onboarding."
+          title={copy.title}
+          description={copy.description}
           action={
             <Button asChild variant="outline" size="sm">
-              <Link to="/admin/drivers">Invite driver</Link>
+              <Link to="/admin/drivers">
+                {copy.ctaLabel ?? "Invite driver"}
+              </Link>
             </Button>
           }
         />
@@ -216,6 +234,7 @@ function OnboardingQueueCard({ className }: { className?: string }) {
 
 function ActiveLoadsWidget({ className }: { className?: string }) {
   const loads = FIXTURE_ACTIVE_LOADS;
+  const copy = EMPTY_COPY["dashboard.activeLoads"];
   return (
     <Section
       title="Active loads"
@@ -233,7 +252,20 @@ function ActiveLoadsWidget({ className }: { className?: string }) {
     >
       {loads.length === 0 ? (
         <div className="px-5 py-6">
-          <EmptyState title="No active loads" />
+          <EmptyState
+            variant={copy.variant}
+            icon={Truck}
+            title={copy.title}
+            description={copy.description}
+            action={
+              <Button asChild variant="primary" size="sm">
+                <Link to="/admin/loads/new">
+                  {copy.ctaLabel ?? "New load"}
+                  <ArrowRight className="size-3.5" />
+                </Link>
+              </Button>
+            }
+          />
         </div>
       ) : (
         <ul className="divide-y divide-border">
@@ -270,6 +302,7 @@ function ActiveLoadsWidget({ className }: { className?: string }) {
 
 function ExpiringSoonWidget({ className }: { className?: string }) {
   const docs = FIXTURE_EXPIRING_DOCS;
+  const copy = EMPTY_COPY["dashboard.expiringDocs"];
   return (
     <Section
       title="Expiring soon"
@@ -288,9 +321,10 @@ function ExpiringSoonWidget({ className }: { className?: string }) {
       {docs.length === 0 ? (
         <div className="px-5 py-6">
           <EmptyState
+            variant={copy.variant}
             icon={FileWarning}
-            title="Nothing expiring"
-            description="All driver and truck docs are current past 60 days."
+            title={copy.title}
+            description={copy.description}
           />
         </div>
       ) : (
@@ -321,6 +355,7 @@ function ExpiringSoonWidget({ className }: { className?: string }) {
 
 function RecentActivityWidget() {
   const activity = FIXTURE_ACTIVITY;
+  const copy = EMPTY_COPY["dashboard.activity"];
   return (
     <Section
       title="Recent activity"
@@ -334,25 +369,34 @@ function RecentActivityWidget() {
         </Button>
       }
     >
-      <ul className="flex flex-col divide-y divide-border">
-        {activity.map((a) => (
-          <li
-            key={a.id}
-            className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
-          >
-            <div className="flex min-w-0 flex-col">
-              <span className="truncate text-sm">
-                <span className="font-medium">{a.actor}</span>{" "}
-                <span className="text-muted-foreground">{a.action}</span>{" "}
-                <span className="font-medium">{a.target}</span>
+      {activity.length === 0 ? (
+        <EmptyState
+          variant={copy.variant}
+          icon={History}
+          title={copy.title}
+          description={copy.description}
+        />
+      ) : (
+        <ul className="flex flex-col divide-y divide-border">
+          {activity.map((a) => (
+            <li
+              key={a.id}
+              className="flex items-center justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+            >
+              <div className="flex min-w-0 flex-col">
+                <span className="truncate text-sm">
+                  <span className="font-medium">{a.actor}</span>{" "}
+                  <span className="text-muted-foreground">{a.action}</span>{" "}
+                  <span className="font-medium">{a.target}</span>
+                </span>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+                {formatRelativeFromNow(a.at)}
               </span>
-            </div>
-            <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
-              {formatRelativeFromNow(a.at)}
-            </span>
-          </li>
-        ))}
-      </ul>
+            </li>
+          ))}
+        </ul>
+      )}
     </Section>
   );
 }

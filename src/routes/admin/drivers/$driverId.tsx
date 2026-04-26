@@ -1,4 +1,5 @@
 import { createFileRoute, notFound } from "@tanstack/react-router";
+import * as React from "react";
 import {
   AlertOctagon,
   Calendar,
@@ -21,6 +22,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { toast } from "@/lib/toast";
 import { BackLink } from "@/components/common/BackLink";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -41,13 +43,9 @@ import { StatusPill } from "@/components/ui/status-pill";
 import type { DriverStatus } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { FixtureDriver } from "@/lib/fixtures/drivers";
-import {
-  FIXTURE_DRIVERS,
-  PAY_MODEL_LABEL,
-  formatPayRate,
-  formatPhone,
-} from "@/lib/fixtures/drivers";
-import { daysUntil } from "@/lib/format";
+import { FIXTURE_DRIVERS, formatPhone } from "@/lib/fixtures/drivers";
+import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
+import { daysUntil, formatMoneyCents } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/drivers/$driverId")({
@@ -62,9 +60,23 @@ export const Route = createFileRoute("/admin/drivers/$driverId")({
 function DriverDetailPage() {
   const { driver } = Route.useLoaderData();
   const primary = primaryActionFor(driver.status);
+  const [suspendOpen, setSuspendOpen] = React.useState(false);
   const cdlDays = daysUntil(driver.cdlExpiration);
   const medDays = daysUntil(driver.medicalExpiration);
   const criticalDays = Math.min(cdlDays, medDays);
+
+  // Period = loads delivered by this driver in the last 14 days. Aggregates
+  // only loads that have driverPayCents set (null = pay not yet entered).
+  const periodStart = Date.now() - 14 * 86_400_000;
+  const driverLoads = FIXTURE_LOADS.filter((l) => l.driver?.id === driver.id);
+  const periodLoads = driverLoads.filter(
+    (l) => new Date(l.updatedAt).getTime() >= periodStart,
+  );
+  const paidLoads = periodLoads.filter((l) => l.driverPayCents !== null);
+  const periodPayCents = paidLoads.reduce(
+    (sum, l) => sum + (l.driverPayCents ?? 0),
+    0,
+  );
 
   return (
     <div className="flex flex-col gap-5">
@@ -137,17 +149,7 @@ function DriverDetailPage() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="danger"
-                  onSelect={() => {
-                    if (
-                      window.confirm(
-                        `Suspend ${driver.firstName} ${driver.lastName}? They'll lose dispatch access immediately.`,
-                      )
-                    ) {
-                      toast.success(
-                        `${driver.firstName} ${driver.lastName} suspended`,
-                      );
-                    }
-                  }}
+                  onSelect={() => setSuspendOpen(true)}
                 >
                   <AlertOctagon /> Suspend driver
                 </DropdownMenuItem>
@@ -166,9 +168,15 @@ function DriverDetailPage() {
               emphasis: true,
             },
             {
-              label: "Pay model",
-              value: formatPayRate(driver),
-              sublabel: PAY_MODEL_LABEL[driver.payModel],
+              label: "Pay this period",
+              value:
+                paidLoads.length > 0
+                  ? formatMoneyCents(periodPayCents)
+                  : "—",
+              sublabel:
+                paidLoads.length > 0
+                  ? `${paidLoads.length} load${paidLoads.length === 1 ? "" : "s"} · last 14d`
+                  : "no pay recorded yet",
               mono: true,
             },
             {
@@ -284,11 +292,51 @@ function DriverDetailPage() {
         </TabsContent>
 
         <TabsContent value="pay" className="mt-4">
-          <EmptyCard
-            icon={Wallet}
-            title="Pay data loads from /admin/pay"
-            description={`Pay model: ${PAY_MODEL_LABEL[driver.payModel]} at ${formatPayRate(driver)}. Per-period settlements appear here once the pay feature is wired.`}
-          />
+          {paidLoads.length === 0 ? (
+            <EmptyCard
+              icon={Wallet}
+              title="No pay yet this period"
+              description={`Loads completed by ${driver.firstName} over the last 14 days with admin-entered pay will show up here. Per-period settlements roll up to /admin/pay.`}
+            />
+          ) : (
+            <Card className="gap-0 p-0">
+              <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                    Pay this period
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    Last 14 days · {paidLoads.length} load
+                    {paidLoads.length === 1 ? "" : "s"} with pay set
+                  </span>
+                </div>
+                <span className="font-mono text-2xl font-bold tabular-nums">
+                  {formatMoneyCents(periodPayCents)}
+                </span>
+              </div>
+              <ul className="divide-y divide-border">
+                {paidLoads.map((l) => (
+                  <li
+                    key={l.id}
+                    className="flex items-center justify-between gap-3 px-5 py-3"
+                  >
+                    <div className="flex min-w-0 flex-col">
+                      <span className="font-mono text-sm font-semibold">
+                        {l.loadNumber}
+                      </span>
+                      <span className="truncate text-[11px] text-muted-foreground">
+                        {l.pickup.city}, {l.pickup.state} → {l.delivery.city},{" "}
+                        {l.delivery.state}
+                      </span>
+                    </div>
+                    <span className="font-mono text-sm font-semibold tabular-nums">
+                      {formatMoneyCents(l.driverPayCents ?? 0)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
         </TabsContent>
 
         <TabsContent value="loads" className="mt-4">
@@ -299,6 +347,21 @@ function DriverDetailPage() {
           />
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={suspendOpen}
+        onOpenChange={setSuspendOpen}
+        tone="danger"
+        title={`Suspend ${driver.firstName} ${driver.lastName}?`}
+        description="They'll lose dispatch access immediately and won't appear in driver pickers. You can reinstate them later from this page."
+        confirmLabel="Suspend driver"
+        onConfirm={() => {
+          toast.success(
+            `${driver.firstName} ${driver.lastName} suspended`,
+          );
+          setSuspendOpen(false);
+        }}
+      />
     </div>
   );
 }

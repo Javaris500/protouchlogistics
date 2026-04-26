@@ -1,0 +1,760 @@
+{
+  "master": {
+    "metadata": {
+      "created": "2026-04-23",
+      "updated": "2026-04-23",
+      "project": "ProTouch Logistics",
+      "sessionGoal": "Strip mock data from admin portal (keep 3 demo drivers + their trucks, brokers, loads). Remove pay-model concept. Add load.driverPayCents (admin-editable until load completed, read-only after). Build production-grade empty-state foundation. No UI/UX redesign — empty states and the new pay field are the only visible changes.",
+      "productionReady": true,
+      "keptSet": {
+        "drivers": "Exactly 3 named drivers with full profiles (CDL, medical, city, phone, email, assigned truck).",
+        "trucks": "Only trucks referenced by the 3 drivers' assignedTruck field.",
+        "brokers": "Only brokers referenced by the 3 drivers' loads.",
+        "loads": "3-6 loads tied to the 3 drivers, mixed statuses, with driverPayCents populated and a driverPayUpdatedAt field."
+      },
+      "stripped": [
+        "Pay records (driver_pay_records concept removed entirely)",
+        "Invoices (all)",
+        "Documents (all)",
+        "Audit log entries",
+        "Notifications",
+        "Analytics aggregates (empty; analytics page shows 'needs data' copy, not zeroed charts)",
+        "Dashboard KPIs (zeros, no trend pills)",
+        "Active loads on dashboard (widget-level empty state)",
+        "Expiring docs on dashboard",
+        "Recent activity on dashboard",
+        "Pending onboarding queue",
+        "Tracking GPS points",
+        "Integration connections (inline 'not connected' cards)"
+      ],
+      "payModelChange": {
+        "removed": [
+          "driver_profiles.payModel",
+          "driver_profiles.payRate",
+          "FixtureDriver.payModel",
+          "FixtureDriver.payRate",
+          "PAY_MODEL_LABEL",
+          "formatPayRate()",
+          "InviteDriverDialog payModel+payRate fields",
+          "DriversTable Pay column",
+          "DriverCard Pay stat"
+        ],
+        "added": [
+          "load.driverPayCents (int|null, admin-editable)",
+          "load.driverPayUpdatedAt (timestamptz|null, tracks edits after creation)",
+          "Driver pay input on LoadNew form (optional)",
+          "Driver pay display + inline edit on Load detail (editable iff status != completed)",
+          "Soft-warning AlertDialog on assign when driverPayCents is null",
+          "Block Mark-Complete when driverPayCents is null (error toast)"
+        ],
+        "deferredToBackendWiring": [
+          "Driver-side 'Pay pending' empty state (driver app not yet built)",
+          "'Updated Xh ago' display on driver side",
+          "pay_changed notification on load.driverPayCents change"
+        ],
+        "rules": {
+          "editableWhile": "load.status != 'completed'",
+          "requiredBeforeCompletion": true,
+          "driverView": "read-only on load detail"
+        }
+      },
+      "emptyStateVariants": {
+        "first-time": "No records exist yet. Dashed border, primary-tinted icon. Primary CTA pointing to the creation action.",
+        "filter": "Records exist, filters hide them. Solid subtle border, muted icon. 'Clear filters' secondary CTA.",
+        "caught-up": "Records exist, none match this view right now. Solid subtle border, success-tinted icon. Positive tone, no CTA."
+      },
+      "dependencyGraph": {
+        "1": [],
+        "2": [
+          1
+        ],
+        "3": [
+          1,
+          4
+        ],
+        "4": [
+          1
+        ],
+        "5": [
+          1
+        ],
+        "6": [
+          1
+        ]
+      },
+      "verificationGate": "Every task must pass `npm run typecheck` and `npm run build` before status flips to done. No task completes with type errors or broken imports."
+    },
+    "tasks": [
+      {
+        "id": 1,
+        "title": "Foundation — Empty state system, skeletons, error state, copy dictionary",
+        "description": "Build the shared infrastructure every other agent will consume. No fixture edits, no page edits. Pure shared-component work.",
+        "status": "done",
+        "priority": "high",
+        "agent": "agent-1-foundation",
+        "dependencies": [],
+        "files": [
+          "src/components/common/EmptyState.tsx (edit)",
+          "src/components/common/Skeleton.tsx (new)",
+          "src/components/common/ErrorState.tsx (new)",
+          "src/components/common/KpiCard.tsx (edit)",
+          "src/lib/empty-copy.ts (new)"
+        ],
+        "details": "Agent 1 produces the building blocks all UI-strip agents will import. Everything downstream blocks on this task's completion. No consumer code changes here — only the primitives.",
+        "testStrategy": "`npm run typecheck` passes. `npm run build` succeeds. Each EmptyState variant renders with visually distinct border+icon treatment. Skeleton variants animate via pulse. ErrorState retry button fires onRetry callback. empty-copy.ts exports a typed EMPTY_COPY record covering every surface listed in subtask 1.4. KpiCard with trend=null renders without the trend pill.",
+        "subtasks": [
+          {
+            "id": "1.1",
+            "title": "Extend EmptyState with variant prop",
+            "description": "Add `variant?: 'first-time' | 'filter' | 'caught-up'` prop, default 'first-time'. Vary border style and icon background tint per variant. No layout changes. Keep the existing API (icon, title, description, action, className) intact — variant is purely additive.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "EmptyState accepts `variant` prop with the three enumerated values",
+              "'first-time' renders dashed border + primary-tinted icon bg (matches current visual)",
+              "'filter' renders solid subtle border + muted icon bg",
+              "'caught-up' renders solid subtle border + success-tinted icon bg",
+              "Omitting `variant` defaults to 'first-time' — zero regressions on existing call sites"
+            ]
+          },
+          {
+            "id": "1.2",
+            "title": "Create Skeleton primitive and variants",
+            "description": "New file src/components/common/Skeleton.tsx. Exports: <Skeleton className>, <TableSkeleton rows cols>, <KpiSkeleton>, <CardSkeleton>, <ChartSkeleton aspect>. Uses existing tw-animate-css pulse animation.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Base <Skeleton> renders a rounded rect with pulse animation",
+              "<TableSkeleton rows={N} cols={M}> renders N rows × M cells of gray bars",
+              "<KpiSkeleton> matches KpiCard dimensions (~84px tall, full-width)",
+              "<CardSkeleton> renders generic card-shaped pulse",
+              "<ChartSkeleton aspect='16/9'> honors aspect ratio via aspect-ratio CSS",
+              "All variants respect className prop for override"
+            ]
+          },
+          {
+            "id": "1.3",
+            "title": "Create ErrorState component",
+            "description": "New file src/components/common/ErrorState.tsx. Visual family matches EmptyState (centered icon + title + description). Adds Retry button and optional collapsed technical-details disclosure.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Props: `title: string`, `description?: string`, `onRetry?: () => void`, `technicalDetails?: string`",
+              "Retry button only renders when onRetry provided",
+              "Technical details collapsed by default, disclosed on click",
+              "Uses --danger color tokens for icon tint"
+            ]
+          },
+          {
+            "id": "1.4",
+            "title": "Create empty-copy.ts dictionary",
+            "description": "New file src/lib/empty-copy.ts exporting EMPTY_COPY record. Centralized source of truth for every empty-state string in the admin app. Keyed by surface. Each entry: { title, description, ctaLabel?, ctaHref?, variant }.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "EMPTY_COPY typed as `Record<SurfaceKey, EmptyCopy>`",
+              "Covers at minimum: dashboard.activeLoads, dashboard.expiringDocs, dashboard.activity, dashboard.onboardingQueue, dashboard.liveFleet, drivers.filter, drivers.pending, trucks.firstTime, trucks.filter, brokers.firstTime, brokers.filter, loads.firstTime, loads.filter, load.breadcrumbs, invoices.firstTime, invoiceNew.noUnbilled, pay.firstTime, documents.firstTime, analytics.needsData, tracking.firstTime, notifications.firstTime, settings.audit.firstTime, settings.integrations.none",
+              "Every entry has non-empty title and description",
+              "Entries with CTAs have both ctaLabel and ctaHref set",
+              "All copy answers WHAT appears here + HOW to get it there — never 'No data'"
+            ]
+          },
+          {
+            "id": "1.5",
+            "title": "KpiCard null-trend support",
+            "description": "Update KpiCard to accept `trend: Trend | null`. When null, hide the trend pill entirely. Prevents day-1 '+0% vs last week' nonsense when prior-period sample is empty.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Trend prop type widens to `Trend | null`",
+              "When null, trend pill DOM is omitted entirely (not just hidden)",
+              "Existing non-null trend rendering unchanged",
+              "All current KpiCard call sites still typecheck"
+            ]
+          }
+        ],
+        "completedAt": "2026-04-23"
+      },
+      {
+        "id": 2,
+        "title": "Dashboard strip — wire 5 widgets to empty states",
+        "description": "Strip all fixture data from /admin/dashboard and replace with EmptyState renders using Task 1's variant system and copy dictionary. Zeroed KPIs with trend pills suppressed.",
+        "status": "done",
+        "priority": "high",
+        "agent": "agent-2-dashboard",
+        "dependencies": [
+          1
+        ],
+        "files": [
+          "src/routes/admin/dashboard.tsx",
+          "src/lib/fixtures/dashboard.ts"
+        ],
+        "details": "Dashboard is Gary's landing page. On day-1 prod, every widget must render a sensible empty state with correct tonal variant (first-time for never-had-data, caught-up for win states like 'nothing expiring', 'no pending approvals').",
+        "testStrategy": "Navigate to /admin/dashboard. All four KPIs show 0 with no trend pill. Active Loads widget shows first-time empty with 'New load' CTA. Expiring Soon shows caught-up empty. Recent Activity shows first-time empty. Onboarding Queue shows caught-up empty. Live Fleet shows tracking.firstTime copy. typecheck + build pass.",
+        "subtasks": [
+          {
+            "id": "2.1",
+            "title": "Strip dashboard fixtures",
+            "description": "In src/lib/fixtures/dashboard.ts: FIXTURE_KPIS all numeric fields set to 0, all trend objects set to null. FIXTURE_ACTIVE_LOADS = []. FIXTURE_EXPIRING_DOCS = []. FIXTURE_ACTIVITY = []. FIXTURE_PENDING_ONBOARDING_COUNT = 0. Preserve exported type definitions — types stay, values go to zero/empty.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "All 5 FIXTURE_* exports updated to zero/empty",
+              "TypeScript types for each remain intact and exported",
+              "KpiTrends type widened to allow null per trend field (or FIXTURE_KPIS.trends typed to reflect null values)"
+            ]
+          },
+          {
+            "id": "2.2",
+            "title": "Wire Active Loads widget to first-time empty state",
+            "description": "In src/routes/admin/dashboard.tsx ActiveLoadsWidget: when loads array empty, render <EmptyState variant='first-time'> using empty-copy.ts dashboard.activeLoads entry.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Empty branch renders EmptyState with 'first-time' variant",
+              "Title and description sourced from EMPTY_COPY.dashboard.activeLoads",
+              "CTA button links to /admin/loads/new"
+            ]
+          },
+          {
+            "id": "2.3",
+            "title": "Wire Expiring Soon widget to caught-up empty state",
+            "description": "ExpiringSoonWidget renders <EmptyState variant='caught-up'> using dashboard.expiringDocs copy when docs array empty.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Uses 'caught-up' variant",
+              "Title conveys win state ('Nothing expiring' or similar)",
+              "No CTA"
+            ]
+          },
+          {
+            "id": "2.4",
+            "title": "Wire Recent Activity widget to first-time empty state",
+            "description": "RecentActivityWidget renders EmptyState when activity array empty.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Uses 'first-time' variant",
+              "Copy from EMPTY_COPY.dashboard.activity",
+              "No primary CTA — activity populates automatically as users work"
+            ]
+          },
+          {
+            "id": "2.5",
+            "title": "Wire Onboarding Queue card to caught-up state (already present, convert to variant prop)",
+            "description": "OnboardingQueueCard's existing empty branch already exists — convert to use variant='caught-up' and pull copy from EMPTY_COPY.dashboard.onboardingQueue.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Uses 'caught-up' variant",
+              "Copy migrated from inline strings to empty-copy.ts",
+              "CTA ('Invite driver') still present and links to /admin/drivers"
+            ]
+          },
+          {
+            "id": "2.6",
+            "title": "Live Fleet widget empty copy",
+            "description": "LiveMapPreview replaces its placeholder-map + 'X drivers reporting' text with tracking.firstTime copy when zero active drivers. Keep the ambient backdrop for visual texture.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "When FIXTURE_KPIS.driversOnRoadNow === 0, copy reads 'No drivers on the road' + description from EMPTY_COPY.dashboard.liveFleet",
+              "Decorative background preserved",
+              "No fake '0 drivers reporting' text"
+            ]
+          },
+          {
+            "id": "2.7",
+            "title": "KPI row — null trends render cleanly",
+            "description": "KpiRow passes null trend values through to KpiCard; verify no '+0% vs last week' artifacts on day-1.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "All 4 KPI cards render value '0' with no trend pill DOM present",
+              "Visual layout holds without trend pill (no collapse / layout shift)"
+            ]
+          }
+        ],
+        "completedAt": "2026-04-23"
+      },
+      {
+        "id": 3,
+        "title": "Fleet — Trucks list + detail, Tracking page",
+        "description": "Trucks page shows only the trucks assigned to the 3 kept drivers. Truck detail 404s on unknown IDs. Tracking page shows 'no drivers on the road' empty state.",
+        "status": "done",
+        "priority": "medium",
+        "agent": "agent-3-fleet",
+        "dependencies": [
+          1,
+          4
+        ],
+        "files": [
+          "src/routes/admin/trucks/index.tsx",
+          "src/routes/admin/trucks/$truckId.tsx",
+          "src/routes/admin/tracking.tsx"
+        ],
+        "details": "Depends on Agent 4 for the trimmed FIXTURE_TRUCKS set. After Agent 4 lands fixture changes, Agent 3 wires the fleet pages to consume them with proper empty-state branching for filter-empty scenarios.",
+        "testStrategy": "/admin/trucks renders only the kept trucks. Filter to an unused status → filter-empty EmptyState renders with Clear Filters action. Navigate to /admin/trucks/nonexistent-id → 404/redirect. /admin/tracking shows tracking.firstTime copy, no fake map markers.",
+        "subtasks": [
+          {
+            "id": "3.1",
+            "title": "Trucks list — filter-empty branching",
+            "description": "When filtered rows empty but FIXTURE_TRUCKS has data: render <EmptyState variant='filter'> with Clear Filters CTA. When FIXTURE_TRUCKS itself is empty (edge case): render first-time with Add Truck CTA.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Two-tier branching: totalCount vs filtered.length",
+              "Filter variant copy from EMPTY_COPY.trucks.filter",
+              "First-time variant copy from EMPTY_COPY.trucks.firstTime",
+              "Clear Filters action resets filter and search state"
+            ]
+          },
+          {
+            "id": "3.2",
+            "title": "Truck detail 404 handling",
+            "description": "In /admin/trucks/$truckId: if requested truckId not in FIXTURE_TRUCKS, render a not-found state with link back to /admin/trucks. Uses TanStack Router notFoundComponent pattern or inline check.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Unknown truckId renders not-found UI (not a blank page)",
+              "Link back to /admin/trucks visible",
+              "Known truckId renders normally"
+            ]
+          },
+          {
+            "id": "3.3",
+            "title": "Tracking page empty state",
+            "description": "Strip any fixture imports from /admin/tracking. When zero active drivers on road, render tracking.firstTime empty state. Map placeholder preserved as backdrop if it exists.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "No fixture data visible",
+              "tracking.firstTime copy from EMPTY_COPY",
+              "Page does not crash on zero-data"
+            ]
+          }
+        ],
+        "completedAt": "2026-04-23"
+      },
+      {
+        "id": 4,
+        "title": "Drivers + Dispatch — fixture trim, pay-model removal, new driverPayCents field",
+        "description": "The largest task. Owns the fixture trim for drivers/loads/brokers/trucks. Removes pay-model from data + UI. Adds the new load.driverPayCents field across LoadNew, Load detail, and driver detail aggregation. Implements soft-warning and completion-block rules.",
+        "status": "done",
+        "priority": "critical",
+        "agent": "agent-4-drivers-dispatch",
+        "dependencies": [
+          1
+        ],
+        "files": [
+          "src/lib/fixtures/drivers.ts",
+          "src/lib/fixtures/loads.ts",
+          "src/lib/fixtures/brokers.ts",
+          "src/lib/fixtures/trucks.ts",
+          "src/components/forms/InviteDriverDialog.tsx",
+          "src/routes/admin/drivers/index.tsx",
+          "src/routes/admin/drivers/$driverId.tsx",
+          "src/routes/admin/drivers/pending.tsx",
+          "src/routes/admin/loads/index.tsx",
+          "src/routes/admin/loads/$loadId.tsx",
+          "src/routes/admin/loads/new.tsx",
+          "src/routes/admin/brokers/index.tsx",
+          "src/routes/admin/brokers/$brokerId.tsx"
+        ],
+        "details": "Agent 4 is the blocker for Agent 3 (fleet needs trimmed FIXTURE_TRUCKS). Prioritize subtasks 4.1-4.5 (fixture trim) first so Agent 3 can unblock, then tackle UI changes.",
+        "testStrategy": "Drivers page shows exactly 3 named drivers with no Pay column. Invite dialog has only email + hireDate. Loads page shows their 3-6 loads with driverPayCents visible. Creating a new load surfaces a Driver pay input. Assigning a driver with pay blank triggers a soft-warning AlertDialog (Continue / Cancel). Attempting to mark a load completed with pay blank shows an error toast and does not transition. Load detail allows inline pay edit while status != completed; after completed, field is read-only and shows 'Updated Xh ago' meta when applicable. typecheck + build pass.",
+        "subtasks": [
+          {
+            "id": "4.1",
+            "title": "Trim FIXTURE_DRIVERS to 3 drivers",
+            "description": "Replace FIXTURE_DRIVERS with exactly 3 driver entries. Each: full name, realistic email and phone, city/state, CDL number+class+state+expiration, medical card expiration, assignedTruck ref, loadsThisYear count, status ('active' for all 3). Delete payModel and payRate fields from every entry and from the FixtureDriver type.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "FIXTURE_DRIVERS.length === 3",
+              "Each driver has all non-pay fields populated (no undefined)",
+              "FixtureDriver type no longer includes payModel, payRate",
+              "Exports PAY_MODEL_LABEL and formatPayRate removed from drivers.ts",
+              "All 3 drivers have status === 'active'",
+              "All 3 have an assignedTruck set"
+            ]
+          },
+          {
+            "id": "4.2",
+            "title": "Trim FIXTURE_LOADS and add driverPayCents + driverPayUpdatedAt",
+            "description": "Replace FIXTURE_LOADS with 3-6 loads, each tied to one of the kept 3 drivers. Mixed statuses: at least one 'completed' (with driverPayCents set), at least one active (e.g. 'en_route_delivery' with driverPayCents set), at least one 'assigned' (driverPayCents may be null to exercise empty-pay UI). Add driverPayCents (int|null) and driverPayUpdatedAt (ISO string|null) fields to FixtureLoad type and every load entry.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "FIXTURE_LOADS length between 3 and 6 inclusive",
+              "Every load.driverId references one of the 3 kept drivers",
+              "FixtureLoad type includes driverPayCents: number | null",
+              "FixtureLoad type includes driverPayUpdatedAt: string | null",
+              "At least one completed load with non-null driverPayCents",
+              "At least one in-flight load with non-null driverPayCents",
+              "At least one assigned load with driverPayCents === null (to exercise soft-warning UI)",
+              "Realistic pay values (e.g. 45000, 87500, 120000 cents)"
+            ]
+          },
+          {
+            "id": "4.3",
+            "title": "Trim FIXTURE_BROKERS to referenced brokers only",
+            "description": "Reduce FIXTURE_BROKERS to just the brokers referenced by the kept loads' brokerId field (2-3 brokers typically).",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Every load.brokerId references an entry in FIXTURE_BROKERS",
+              "No orphaned broker entries",
+              "Each broker has realistic MC/DOT, contact, payment terms"
+            ]
+          },
+          {
+            "id": "4.4",
+            "title": "Trim FIXTURE_TRUCKS to assigned trucks only",
+            "description": "Reduce FIXTURE_TRUCKS to just the trucks referenced by the 3 drivers' assignedTruck field.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Every driver.assignedTruck.unitNumber references an entry in FIXTURE_TRUCKS",
+              "No orphaned truck entries",
+              "Each truck has VIN, make/model/year, plates, expirations"
+            ]
+          },
+          {
+            "id": "4.5",
+            "title": "Simplify InviteDriverDialog — remove pay model / pay rate fields",
+            "description": "In src/components/forms/InviteDriverDialog.tsx: remove payModel and payRate from InviteDriverValues type. Remove the Pay Model Select and Pay Rate Input FormField blocks (approx lines 121-181). Remove PAY_MODEL_HINT and payLabel() helper. Form reduces to email + hireDate only.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "InviteDriverValues has exactly { email, hireDate }",
+              "Dialog form renders only 2 input fields",
+              "No PAY_MODEL_HINT, payLabel export remaining",
+              "onSubmit signature updated accordingly",
+              "All consumers of InviteDriverDialog still typecheck"
+            ]
+          },
+          {
+            "id": "4.6",
+            "title": "Drivers list — remove Pay column and stat",
+            "description": "In src/routes/admin/drivers/index.tsx: remove Pay TableHead + TableCell from DriversTable. Remove Pay stat quadrant from DriverCard. Remove imports of PAY_MODEL_LABEL, formatPayRate, Wallet (if unused elsewhere in the file).",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Table has no Pay column",
+              "Grid card has no Pay quadrant (replaced cleanly — no layout gap)",
+              "No import of PAY_MODEL_LABEL or formatPayRate remains",
+              "Visual spacing of remaining columns/cards still balanced"
+            ]
+          },
+          {
+            "id": "4.7",
+            "title": "Driver detail — remove pay model, add per-period pay aggregation",
+            "description": "In /admin/drivers/$driverId.tsx: remove any pay model / pay rate display. Add a 'Pay this period' read-only block showing sum of driverPayCents across the driver's loads this week/month (or whatever period the detail page uses). If driver has no loads with pay set → render EmptyState caught-up 'No pay yet this period'.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "No pay model or pay rate strings rendered",
+              "Pay this period block aggregates load.driverPayCents correctly",
+              "Handles divider-by-zero / no loads case with empty state",
+              "404 for unknown driverId redirects or renders not-found"
+            ]
+          },
+          {
+            "id": "4.8",
+            "title": "Drivers pending — empty state",
+            "description": "In src/routes/admin/drivers/pending.tsx: replace local PENDING const with []. Existing empty state branch stays; convert to variant='caught-up' and pull copy from EMPTY_COPY.drivers.pending.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "PENDING = []",
+              "EmptyState uses caught-up variant",
+              "Copy sourced from EMPTY_COPY"
+            ]
+          },
+          {
+            "id": "4.9",
+            "title": "Loads list — kept loads visible with filter-empty branching",
+            "description": "In /admin/loads/index.tsx: shows the 3-6 kept loads. When filter returns zero rows, render filter variant EmptyState with Clear Filters. No first-time state needed in practice (FIXTURE_LOADS non-empty in kept set).",
+            "status": "done",
+            "acceptanceCriteria": [
+              "All kept loads rendered correctly",
+              "Filter-empty branch renders EmptyState variant='filter'",
+              "Clear Filters resets filter+search state"
+            ]
+          },
+          {
+            "id": "4.10",
+            "title": "LoadNew — add Driver pay input",
+            "description": "In /admin/loads/new.tsx: add a Driver pay dollar input. Optional (not blocking form submission). Helper text: 'Optional. Required before load can be marked completed.' Stores cents (convert from display dollars on submit).",
+            "status": "done",
+            "acceptanceCriteria": [
+              "New FormField labeled 'Driver pay'",
+              "Input type number with 0.01 step, min 0",
+              "Helper text present",
+              "Submit stores driverPayCents as integer cents (null if blank)",
+              "Form still submits when field left blank"
+            ]
+          },
+          {
+            "id": "4.11",
+            "title": "LoadNew — soft-warning dialog on assign when pay blank",
+            "description": "When form submits with driverId assigned AND driverPayCents is null/blank: intercept with an AlertDialog 'Driver pay isn't set yet. Continue anyway?' [Cancel] [Continue anyway]. Continue completes submission; Cancel returns to form with focus on pay input.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "AlertDialog only fires when driver assigned AND pay blank",
+              "No dialog when pay is set, regardless of assignment",
+              "No dialog when no driver assigned",
+              "Cancel leaves form unchanged, pay input focused",
+              "Continue proceeds with form submission"
+            ]
+          },
+          {
+            "id": "4.12",
+            "title": "Load detail — driver pay display with inline edit",
+            "description": "In /admin/loads/$loadId.tsx: display driverPayCents as a prominent dollar value. If load.status !== 'completed', allow inline edit (click-to-edit or edit icon). On save, update load.driverPayCents and set driverPayUpdatedAt to now. If load.status === 'completed', render read-only.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Pay renders as formatted dollars (e.g. $1,200.00)",
+              "Edit affordance only when status !== 'completed'",
+              "Save updates both driverPayCents and driverPayUpdatedAt",
+              "Completed loads show read-only with no edit cursor/icon"
+            ]
+          },
+          {
+            "id": "4.13",
+            "title": "Load detail — 'Updated Xh ago' meta",
+            "description": "When load.driverPayUpdatedAt is non-null and differs from load.createdAt, render a small 'Updated {relative}' timestamp below the pay number. Use formatRelativeFromNow from src/lib/format.ts.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Hidden when driverPayUpdatedAt === null or === createdAt",
+              "Visible and relative-formatted otherwise",
+              "Uses existing formatRelativeFromNow helper",
+              "Small muted text, does not dominate the pay display"
+            ]
+          },
+          {
+            "id": "4.14",
+            "title": "Load detail — Mark-Complete blocks when pay unset",
+            "description": "The Mark Complete action (wherever it lives on load detail) checks driverPayCents !== null before proceeding. If null, toast.error('Enter driver pay before closing this load') and does not advance status.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Transition to 'completed' blocked when driverPayCents is null",
+              "Error toast displayed with clear copy",
+              "Pay input gains focus (or scrolls into view) after block",
+              "When pay set, transition proceeds normally"
+            ]
+          },
+          {
+            "id": "4.15",
+            "title": "Load detail — 404 for unknown loadId",
+            "description": "Unknown loadId renders not-found UI with link back to /admin/loads.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Unknown loadId renders not-found page, not a crash",
+              "Link back to /admin/loads present"
+            ]
+          },
+          {
+            "id": "4.16",
+            "title": "Brokers list — kept brokers with filter-empty branching",
+            "description": "In /admin/brokers/index.tsx: shows 2-3 kept brokers. Filter-empty branches to EmptyState variant='filter'.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Kept brokers render",
+              "Filter-empty shows filter variant empty state",
+              "Clear Filters action works"
+            ]
+          },
+          {
+            "id": "4.17",
+            "title": "Broker detail — 404 for unknown brokerId",
+            "description": "Unknown brokerId → not-found UI. Known brokerId renders normally.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Unknown brokerId renders not-found page",
+              "Known brokerId renders broker profile"
+            ]
+          }
+        ],
+        "completedAt": "2026-04-23"
+      },
+      {
+        "id": 5,
+        "title": "Back office — Invoices, Pay, Documents, Analytics",
+        "description": "Strip all fixtures from back-office pages. Invoices, Pay, Documents empty with first-time copy. Analytics uses 'needs data' copy, not zeroed charts.",
+        "status": "done",
+        "priority": "medium",
+        "agent": "agent-5-back-office",
+        "dependencies": [
+          1
+        ],
+        "files": [
+          "src/routes/admin/invoices/index.tsx",
+          "src/routes/admin/invoices/new.tsx",
+          "src/routes/admin/invoices/$invoiceId.tsx",
+          "src/routes/admin/pay.tsx",
+          "src/routes/admin/pay.$periodId.tsx",
+          "src/routes/admin/documents.tsx",
+          "src/routes/admin/analytics.tsx",
+          "src/lib/fixtures/invoices.ts",
+          "src/lib/fixtures/documents.ts",
+          "src/lib/fixtures/analytics.ts"
+        ],
+        "details": "Strip the fixture exports to empty arrays / zero aggregates. Wire each page's top-level render to EmptyState variant='first-time' using empty-copy.ts. Analytics specifically does NOT render empty charts — the page renders the analytics.needsData copy instead.",
+        "testStrategy": "Navigate to each of /admin/invoices, /admin/pay, /admin/documents, /admin/analytics, /admin/invoices/new. Each shows a proper first-time EmptyState. /admin/invoices/anyid → 404. /admin/pay/anyid → 404. Analytics shows copy, no empty chart axes. typecheck + build pass.",
+        "subtasks": [
+          {
+            "id": "5.1",
+            "title": "Strip invoice, document, analytics fixtures",
+            "description": "invoices.ts and documents.ts export empty arrays. analytics.ts exports zeroed aggregates (all counts/sums at 0).",
+            "status": "done",
+            "acceptanceCriteria": [
+              "FIXTURE_INVOICES = []",
+              "FIXTURE_DOCUMENTS = []",
+              "Analytics fixture sums/counts all at 0 or null",
+              "Exported types preserved"
+            ]
+          },
+          {
+            "id": "5.2",
+            "title": "Invoices list — first-time empty",
+            "description": "/admin/invoices shows EmptyState variant='first-time' using EMPTY_COPY.invoices.firstTime. CTA to /admin/invoices/new.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Empty state renders with first-time variant",
+              "Title + description from EMPTY_COPY",
+              "New invoice CTA present"
+            ]
+          },
+          {
+            "id": "5.3",
+            "title": "Invoice new — no unbilled loads empty state",
+            "description": "/admin/invoices/new shows an EmptyState variant='caught-up' explaining 'No unbilled completed loads' when the load-picker would be empty.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Load picker shows empty state with caught-up variant",
+              "Copy from EMPTY_COPY.invoiceNew.noUnbilled",
+              "Form otherwise remains structurally intact"
+            ]
+          },
+          {
+            "id": "5.4",
+            "title": "Invoice detail — 404 always",
+            "description": "/admin/invoices/$invoiceId renders not-found for any id (since fixtures are empty).",
+            "status": "done",
+            "acceptanceCriteria": [
+              "All invoice ids render not-found",
+              "Link back to /admin/invoices"
+            ]
+          },
+          {
+            "id": "5.5",
+            "title": "Pay page + period detail — empty + 404",
+            "description": "/admin/pay renders first-time EmptyState. /admin/pay/$periodId → 404.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Pay list empty state uses first-time variant",
+              "Copy from EMPTY_COPY.pay.firstTime",
+              "Period detail 404 renders not-found"
+            ]
+          },
+          {
+            "id": "5.6",
+            "title": "Documents page — first-time empty",
+            "description": "/admin/documents renders first-time EmptyState.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Empty state renders with first-time variant",
+              "Copy from EMPTY_COPY.documents.firstTime"
+            ]
+          },
+          {
+            "id": "5.7",
+            "title": "Analytics — 'needs data' copy, no empty charts",
+            "description": "/admin/analytics renders EmptyState with analytics.needsData copy. Empty chart components are removed or conditionally hidden. Does NOT render zeroed chart axes.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "No chart DOM renders when data empty",
+              "EmptyState first-time variant renders page-wide",
+              "Copy from EMPTY_COPY.analytics.needsData",
+              "Page does not appear visually broken on day-1"
+            ]
+          }
+        ],
+        "completedAt": "2026-04-23"
+      },
+      {
+        "id": 6,
+        "title": "Periphery — Notifications, Settings, contracts doc",
+        "description": "Notifications + settings pages stripped to empty. Integrations inlined as 'not connected' cards. Update 05-TECH-CONTRACTS.md for pay-model removal and new driverPayCents contract.",
+        "status": "done",
+        "priority": "medium",
+        "agent": "agent-6-periphery",
+        "dependencies": [
+          1
+        ],
+        "files": [
+          "src/routes/admin/notifications.tsx",
+          "src/routes/admin/settings/index.tsx",
+          "src/routes/admin/settings/audit.tsx",
+          "src/routes/admin/settings/integrations.tsx",
+          "src/routes/admin/settings/preferences.tsx",
+          "src/lib/fixtures/integrations.ts",
+          "05-TECH-CONTRACTS.md",
+          "src/components/layouts/NotificationsPopover.tsx (if fixture-sourced)"
+        ],
+        "details": "Catches the long tail: notifications, 4 settings pages, and the tech-contracts doc update. Integrations page specifically inlines its 6-7 integration cards (Neon, R2, Resend, Mapbox, Google Places, Sentry, Vercel) as a const in-route — no fixture dependency.",
+        "testStrategy": "/admin/notifications empty. Topbar NotificationsPopover empty. /admin/settings/audit empty. /admin/settings/integrations shows 6-7 'not connected' cards. /admin/settings/preferences form renders unchanged. 05-TECH-CONTRACTS.md reflects payModel removal and driverPayCents addition. typecheck + build pass.",
+        "subtasks": [
+          {
+            "id": "6.1",
+            "title": "Notifications page + popover — empty state",
+            "description": "/admin/notifications and the NotificationsPopover (src/components/layouts/NotificationsPopover.tsx or wherever it lives) render first-time EmptyState when list is empty. Strip any hard-coded fixture notification array.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Page renders empty state with first-time variant",
+              "Popover renders a compact empty state (same copy, tighter layout)",
+              "No fixture notifications in output",
+              "Copy from EMPTY_COPY.notifications.firstTime"
+            ]
+          },
+          {
+            "id": "6.2",
+            "title": "Settings index — no fixture deps",
+            "description": "Verify /admin/settings/index.tsx has no fixture imports. If it does, strip them and ensure the overview still renders cleanly.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "No fixture imports",
+              "Overview renders without crash"
+            ]
+          },
+          {
+            "id": "6.3",
+            "title": "Audit log — first-time empty state",
+            "description": "/admin/settings/audit renders EmptyState variant='first-time' with EMPTY_COPY.settings.audit.firstTime copy.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "Empty state renders",
+              "Copy from EMPTY_COPY"
+            ]
+          },
+          {
+            "id": "6.4",
+            "title": "Integrations — inline connection cards",
+            "description": "Replace src/lib/fixtures/integrations.ts usage with an inline const in /admin/settings/integrations.tsx containing all integrations: Neon (Database), Cloudflare R2 (File storage), Resend (Email), Mapbox (Maps), Google Places (Address autocomplete), Sentry (Errors), Vercel (Hosting). Each card shows 'Not connected' status with a Connect CTA (no-op for now). Delete integrations.ts fixture file or reduce to a shared type export.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "7 integration cards render",
+              "Each card has name, description, 'Not connected' pill, Connect button",
+              "No fixture imports; data is an inline const",
+              "Deleted fixture file does not break any other importer (grep for imports before deletion)"
+            ]
+          },
+          {
+            "id": "6.5",
+            "title": "Preferences page — verify no fixture deps",
+            "description": "/admin/settings/preferences is a form. Verify no fixture data feeds it. If any defaults come from fixtures, move to inline defaults.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "No fixture imports",
+              "Form renders and defaults cleanly"
+            ]
+          },
+          {
+            "id": "6.6",
+            "title": "Tech contracts doc — pay model removal + driverPayCents contract",
+            "description": "Edit 05-TECH-CONTRACTS.md: (1) remove payModel and payRate from driver_profiles table spec, (2) add driverPayCents int|null and driverPayUpdatedAt timestamptz|null to loads table spec, (3) remove driver_pay_records snapshot table, replace with a read-model note (view or query helper aggregating load.driverPayCents per driver per period), (4) add updateLoadDriverPay server function contract (admin-only, forbidden when load.status === 'completed', fires pay_changed notification for assigned driver on change), (5) add note to updateLoadStatus that transition to 'completed' must assert driverPayCents != null else throw BusinessRuleError, (6) add pay_changed to notification type enum, (7) add note to getLoadDriver response that driverPayCents and driverPayUpdatedAt are included for driver consumption.",
+            "status": "done",
+            "acceptanceCriteria": [
+              "All 7 contract changes reflected in 05-TECH-CONTRACTS.md",
+              "No remaining references to payModel / payRate on driver_profiles",
+              "driver_pay_records section replaced with read-model note",
+              "pay_changed notification type documented",
+              "Contract for the completion-block rule explicitly stated"
+            ]
+          }
+        ],
+        "completedAt": "2026-04-23"
+      }
+    ]
+  }
+}

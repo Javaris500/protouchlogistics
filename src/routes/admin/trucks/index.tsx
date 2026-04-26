@@ -45,6 +45,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { FIXTURE_TRUCKS, type FixtureTruck } from "@/lib/fixtures/trucks";
 import { daysUntil } from "@/lib/format";
 
@@ -182,16 +183,43 @@ function TrucksListPage() {
           </div>
         </div>
 
-        {pageRows.length === 0 ? (
+        {FIXTURE_TRUCKS.length === 0 ? (
           <div className="p-6">
             <EmptyState
               icon={Truck}
-              title="No trucks match these filters"
-              description="Adjust the filters above or add a new truck to the fleet."
+              variant={EMPTY_COPY["trucks.firstTime"].variant}
+              title={EMPTY_COPY["trucks.firstTime"].title}
+              description={EMPTY_COPY["trucks.firstTime"].description}
               action={
-                <Button variant="primary" size="sm">
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setAddOpen(true)}
+                >
                   <Plus className="size-4" />
-                  Add truck
+                  {EMPTY_COPY["trucks.firstTime"].ctaLabel}
+                </Button>
+              }
+            />
+          </div>
+        ) : pageRows.length === 0 ? (
+          <div className="p-6">
+            <EmptyState
+              icon={Truck}
+              variant={EMPTY_COPY["trucks.filter"].variant}
+              title={EMPTY_COPY["trucks.filter"].title}
+              description={EMPTY_COPY["trucks.filter"].description}
+              action={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setFilter("all");
+                    setSearch("");
+                    setPage(1);
+                  }}
+                >
+                  {EMPTY_COPY["trucks.filter"].ctaLabel}
                 </Button>
               }
             />

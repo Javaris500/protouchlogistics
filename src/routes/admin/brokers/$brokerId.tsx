@@ -1,4 +1,5 @@
 import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import * as React from "react";
 import {
   AlertTriangle,
   Award,
@@ -20,6 +21,7 @@ import type { LucideIcon } from "lucide-react";
 
 import { toast } from "@/lib/toast";
 import { BackLink } from "@/components/common/BackLink";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -63,6 +65,7 @@ function BrokerDetailPage() {
     (l) => l.broker.id === broker.id,
   ).slice(0, 5);
   const invoices = FIXTURE_INVOICES.filter((i) => i.broker.id === broker.id);
+  const [archiveOpen, setArchiveOpen] = React.useState(false);
 
   return (
     <div className="flex flex-col gap-5">
@@ -132,15 +135,7 @@ function BrokerDetailPage() {
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
                   variant="danger"
-                  onSelect={() => {
-                    if (
-                      window.confirm(
-                        `Archive ${broker.companyName}? You can un-archive later, but new loads can't be assigned to archived brokers.`,
-                      )
-                    ) {
-                      toast.success(`${broker.companyName} archived`);
-                    }
-                  }}
+                  onSelect={() => setArchiveOpen(true)}
                 >
                   <Trash2 /> Archive broker
                 </DropdownMenuItem>
@@ -397,6 +392,19 @@ function BrokerDetailPage() {
           )}
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+        tone="danger"
+        title={`Archive ${broker.companyName}?`}
+        description="New loads can't be assigned to archived brokers. Existing loads and invoices stay intact. You can un-archive from the brokers list later."
+        confirmLabel="Archive broker"
+        onConfirm={() => {
+          toast.success(`${broker.companyName} archived`);
+          setArchiveOpen(false);
+        }}
+      />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { Link, createFileRoute } from "@tanstack/react-router";
+import * as React from "react";
 import {
   Calendar,
   Check,
@@ -9,41 +10,35 @@ import {
 } from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { toast } from "@/lib/toast";
 
 export const Route = createFileRoute("/admin/drivers/pending")({
   component: PendingApprovalsPage,
 });
 
-const PENDING = [
-  {
-    id: "dr_p1",
-    firstName: "Devon",
-    lastName: "Walker",
-    email: "devon.walker@example.com",
-    city: "Fort Worth, TX",
-    submittedAt: "2 hours ago",
-    cdlClass: "A",
-    medicalCardExpiration: "2026-09-14",
-  },
-  {
-    id: "dr_p2",
-    firstName: "Rashad",
-    lastName: "Bennett",
-    email: "rashad.b@example.com",
-    city: "Memphis, TN",
-    submittedAt: "Yesterday",
-    cdlClass: "A",
-    medicalCardExpiration: "2027-03-02",
-  },
-];
+interface PendingDriver {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  city: string;
+  submittedAt: string;
+  cdlClass: string;
+  medicalCardExpiration: string;
+}
+
+const PENDING: PendingDriver[] = [];
 
 function PendingApprovalsPage() {
+  const [rejecting, setRejecting] = React.useState<PendingDriver | null>(null);
+
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/drivers">Back to drivers</BackLink>
@@ -58,8 +53,9 @@ function PendingApprovalsPage() {
         <Card className="p-10">
           <EmptyState
             icon={ClipboardCheck}
-            title="You're all caught up"
-            description="New onboarding submissions will appear here."
+            variant={EMPTY_COPY["drivers.pending"].variant}
+            title={EMPTY_COPY["drivers.pending"].title}
+            description={EMPTY_COPY["drivers.pending"].description}
           />
         </Card>
       ) : (
@@ -117,13 +113,7 @@ function PendingApprovalsPage() {
                   variant="outline"
                   size="md"
                   className="w-full sm:w-auto"
-                  onClick={() => {
-                    const reason = window.prompt(
-                      `Reject ${d.firstName} ${d.lastName}'s submission? Enter a reason the driver will see:`,
-                    );
-                    if (!reason) return;
-                    toast.error(`${d.firstName} ${d.lastName} rejected`);
-                  }}
+                  onClick={() => setRejecting(d)}
                 >
                   <X className="size-4" />
                   <span>Reject</span>
@@ -146,6 +136,34 @@ function PendingApprovalsPage() {
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={rejecting !== null}
+        onOpenChange={(next) => {
+          if (!next) setRejecting(null);
+        }}
+        tone="danger"
+        title={
+          rejecting
+            ? `Reject ${rejecting.firstName} ${rejecting.lastName}'s submission?`
+            : "Reject submission?"
+        }
+        description="The driver sees this reason in an email and can resubmit. Keep it specific so they can fix the issue on the next try."
+        confirmLabel="Reject submission"
+        input={{
+          label: "Reason (shown to the driver)",
+          placeholder: "e.g. CDL photo was blurry — please re-upload.",
+          multiline: true,
+          rows: 3,
+          required: true,
+        }}
+        onConfirm={(reason) => {
+          if (!rejecting) return;
+          toast.error(`${rejecting.firstName} ${rejecting.lastName} rejected`);
+          void reason;
+          setRejecting(null);
+        }}
+      />
     </div>
   );
 }

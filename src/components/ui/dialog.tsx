@@ -105,6 +105,7 @@ function DialogContent({
           <DialogPrimitive.Close
             className={cn(
               "absolute right-3 top-3 inline-flex h-7 w-7 items-center justify-center rounded-full",
+              "[@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
               "text-[var(--muted-foreground)] opacity-60",
               "transition-all duration-150",
               "hover:bg-[var(--surface-2)] hover:opacity-100 hover:text-[var(--foreground)]",

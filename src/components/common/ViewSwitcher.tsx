@@ -46,6 +46,7 @@ export function ViewSwitcher<T extends string>({
             title={label}
             className={cn(
               "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5",
+              "[@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:px-3.5",
               "text-[12px] font-semibold tracking-tight",
               "transition-all duration-150",
               "focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]/30",

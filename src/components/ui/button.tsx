@@ -66,9 +66,11 @@ const buttonVariants = cva(
         sm: "h-8 px-3 text-xs gap-1.5 rounded-[8px]",
         md: "h-9 px-4 rounded-[10px]",
         lg: "h-11 px-6 text-base rounded-[12px]",
-        /** Perfect circle — signature industrial polish. */
-        icon: "h-9 w-9 p-0 rounded-full",
-        "icon-sm": "h-8 w-8 p-0 rounded-full",
+        /** Perfect circle — signature industrial polish. Touch devices
+            (pointer:coarse) get bumped to 44px to meet WCAG 2.5.5 AAA. */
+        icon: "h-9 w-9 p-0 rounded-full [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
+        "icon-sm":
+          "h-8 w-8 p-0 rounded-full [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11",
         "icon-lg": "h-11 w-11 p-0 rounded-full",
       },
     },

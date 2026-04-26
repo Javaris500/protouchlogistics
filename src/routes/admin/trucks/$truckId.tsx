@@ -1,4 +1,5 @@
-import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { Link, createFileRoute } from "@tanstack/react-router";
+import * as React from "react";
 import {
   Clock,
   FileText,
@@ -15,6 +16,8 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { EmptyState } from "@/components/common/EmptyState";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -39,18 +42,38 @@ import { daysUntil } from "@/lib/format";
 import { toast } from "@/lib/toast";
 
 export const Route = createFileRoute("/admin/trucks/$truckId")({
-  loader: ({ params }) => {
-    const truck = FIXTURE_TRUCKS.find((t) => t.id === params.truckId);
-    if (!truck) throw notFound();
-    return { truck };
-  },
   component: TruckDetailPage,
 });
 
 function TruckDetailPage() {
-  const { truck } = Route.useLoaderData();
+  const { truckId } = Route.useParams();
+  const truck = FIXTURE_TRUCKS.find((t) => t.id === truckId);
+
+  if (!truck) {
+    return (
+      <div className="flex flex-col gap-5">
+        <BackLink to="/admin/trucks">Back to trucks</BackLink>
+        <PageHeader eyebrow="Truck" title="Truck not found" />
+        <Card className="p-6">
+          <EmptyState
+            icon={TruckIcon}
+            variant="first-time"
+            title="We couldn't find that truck"
+            description="It may have been retired, or the link is out of date. Head back to the trucks list to pick another unit."
+            action={
+              <Button asChild variant="primary" size="sm">
+                <Link to="/admin/trucks">Back to trucks</Link>
+              </Button>
+            }
+          />
+        </Card>
+      </div>
+    );
+  }
+
   const nextDoc = nextExpiring(truck);
   const primary = primaryActionFor(truck.status);
+  const [retireOpen, setRetireOpen] = React.useState(false);
 
   return (
     <div className="flex flex-col gap-5">
@@ -115,15 +138,7 @@ function TruckDetailPage() {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     variant="danger"
-                    onSelect={() => {
-                      if (
-                        window.confirm(
-                          `Retire truck ${truck.unitNumber}? This can't be undone.`,
-                        )
-                      ) {
-                        toast.success(`Truck ${truck.unitNumber} retired`);
-                      }
-                    }}
+                    onSelect={() => setRetireOpen(true)}
                   >
                     <XCircle /> Retire truck
                   </DropdownMenuItem>
@@ -266,6 +281,19 @@ function TruckDetailPage() {
           />
         </TabsContent>
       </Tabs>
+
+      <ConfirmDialog
+        open={retireOpen}
+        onOpenChange={setRetireOpen}
+        tone="danger"
+        title={`Retire truck ${truck.unitNumber}?`}
+        description="This removes the unit from the active fleet. It won't appear in dispatch pickers. This can't be undone."
+        confirmLabel="Retire truck"
+        onConfirm={() => {
+          toast.success(`Truck ${truck.unitNumber} retired`);
+          setRetireOpen(false);
+        }}
+      />
     </div>
   );
 }
