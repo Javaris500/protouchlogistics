@@ -177,6 +177,9 @@ function LoadDetailPage() {
     onSuccess: () => {
       toast.success("Driver assigned");
       queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+      // Loads list shows assignedDriver — needs to refresh so the row no
+      // longer reads "unassigned" after a successful assign.
+      queryClient.invalidateQueries({ queryKey: ["admin", "loads"] });
       setPickerOpen(false);
       setPickedDriverId("");
     },
