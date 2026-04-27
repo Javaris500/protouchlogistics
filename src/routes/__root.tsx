@@ -11,7 +11,45 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import type { RouterContext } from "@/router";
 import "@/styles/globals.css";
 
+function RouteErrorComponent({ error }: { error: unknown }) {
+  // Surface the actual error to whoever is watching server logs (Vercel
+  // Functions panel) AND to the browser DOM in production. The default
+  // CatchBoundary hides the message behind a "Show Error" toggle that
+  // defaults to off in prod.
+  if (typeof console !== "undefined") {
+    // eslint-disable-next-line no-console
+    console.error("[RouteError]", error);
+  }
+  const err = error as { message?: unknown; stack?: unknown };
+  const msg = typeof err?.message === "string" ? err.message : String(error);
+  const stack = typeof err?.stack === "string" ? err.stack : null;
+  return (
+    <div style={{ padding: "1rem", fontFamily: "monospace" }}>
+      <h2 style={{ color: "#b91c1c", fontWeight: 700 }}>
+        Page error
+      </h2>
+      <pre
+        style={{
+          marginTop: "0.5rem",
+          padding: "0.75rem",
+          background: "#fef2f2",
+          border: "1px solid #fecaca",
+          color: "#991b1b",
+          fontSize: 12,
+          whiteSpace: "pre-wrap",
+          wordBreak: "break-word",
+          borderRadius: 4,
+        }}
+      >
+        {msg}
+        {stack ? "\n\n" + stack : null}
+      </pre>
+    </div>
+  );
+}
+
 export const Route = createRootRouteWithContext<RouterContext>()({
+  errorComponent: RouteErrorComponent,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
