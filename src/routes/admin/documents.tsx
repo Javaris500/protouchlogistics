@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   Download,
+  Eye,
   FileText,
   Trash2,
   Upload,
@@ -86,19 +87,36 @@ function DocumentsPage() {
       toast.error(err instanceof Error ? err.message : "Delete failed"),
   });
 
+  async function fetchBlobUrl(documentId: string): Promise<string> {
+    // downloadDocument streams the bytes server-side (the read-write token
+    // for private blobs lives only on the server). The browser turns the
+    // response into a blob: URL we can either save (download) or open
+    // (view in a new tab — browser renders PDFs and images natively).
+    const response = (await downloadDocument({
+      data: { documentId },
+    })) as unknown as Response;
+    if (!response || !(response instanceof Response) || !response.ok) {
+      throw new Error("Couldn't reach the document");
+    }
+    const blob = await response.blob();
+    return URL.createObjectURL(blob);
+  }
+
+  async function handleView(documentId: string) {
+    try {
+      const url = await fetchBlobUrl(documentId);
+      window.open(url, "_blank", "noopener,noreferrer");
+      // Defer revocation so the new tab has time to claim the bytes on
+      // slow networks. Modern browsers GC the blob once no tab references it.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't open the document");
+    }
+  }
+
   async function handleDownload(documentId: string, fileName: string) {
     try {
-      // downloadDocument streams the bytes server-side (the read-write token
-      // for private blobs lives only on the server). Pull the response, turn
-      // it into an object URL, and trigger a real download.
-      const response = (await downloadDocument({
-        data: { documentId },
-      })) as unknown as Response;
-      if (!response || !(response instanceof Response) || !response.ok) {
-        throw new Error("Download failed");
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
+      const url = await fetchBlobUrl(documentId);
       const a = document.createElement("a");
       a.href = url;
       a.download = fileName;
@@ -112,15 +130,12 @@ function DocumentsPage() {
   }
 
   function openUploadFor(kind: "driver" | "truck" | "load") {
-    // For the global documents page, the user enters the owner ID inline.
-    // For most flows they'll upload from the driver/truck/load detail page
-    // where ownerId is implicit.
-    const id = window.prompt(
-      `Paste the ${kind} ID to attach this document to:`,
-    );
-    if (!id) return;
     setOwnerKind(kind);
-    setOwnerId(id);
+    // No ownerId — UploadDocumentDialog renders an entity picker scoped to the
+    // chosen kind so Gary picks by name (e.g. "Unit 101 — 2022 Cascadia") instead
+    // of pasting a UUID. When uploading from a detail page, ownerId is set
+    // directly and the picker is skipped.
+    setOwnerId("");
     setUploadOpen(true);
   }
 
@@ -271,6 +286,14 @@ function DocumentsPage() {
                         <Button
                           variant="ghost"
                           size="sm"
+                          onClick={() => handleView(d.id)}
+                          title="View in new tab"
+                        >
+                          <Eye className="size-3.5" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => handleDownload(d.id, d.fileName)}
                           title="Download"
                         >
@@ -302,7 +325,7 @@ function DocumentsPage() {
         open={uploadOpen}
         onOpenChange={setUploadOpen}
         ownerKind={ownerKind}
-        ownerId={ownerId}
+        ownerId={ownerId || undefined}
         onSubmit={async (fd) => {
           await createMutation.mutateAsync(fd);
         }}

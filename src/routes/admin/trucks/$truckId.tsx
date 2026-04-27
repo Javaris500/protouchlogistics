@@ -50,6 +50,7 @@ import {
 import { listLoadsAdmin } from "@/server/functions/loads";
 import { listDrivers } from "@/server/functions/drivers";
 import { createDocument } from "@/server/functions/documents";
+import { DocumentPanel } from "@/components/common/DocumentPanel";
 import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
 import {
   Dialog,
@@ -333,25 +334,32 @@ function TruckDetailPage() {
                 </TabsContent>
 
                 <TabsContent value="documents" className="mt-4">
-                  <Card className="gap-0 p-0">
-                    <ul className="divide-y divide-border">
-                      <DocRow
-                        label="Registration"
-                        date={truck.registrationExpiration}
-                        onUpload={() => setUploadOpen(true)}
-                      />
-                      <DocRow
-                        label="Insurance"
-                        date={truck.insuranceExpiration}
-                        onUpload={() => setUploadOpen(true)}
-                      />
-                      <DocRow
-                        label="Annual inspection"
-                        date={truck.annualInspectionExpiration}
-                        onUpload={() => setUploadOpen(true)}
-                      />
-                    </ul>
-                  </Card>
+                  <div className="flex flex-col gap-4">
+                    <Card className="gap-0 p-0">
+                      <ul className="divide-y divide-border">
+                        <DocRow
+                          label="Registration"
+                          date={truck.registrationExpiration}
+                          onUpload={() => setUploadOpen(true)}
+                        />
+                        <DocRow
+                          label="Insurance"
+                          date={truck.insuranceExpiration}
+                          onUpload={() => setUploadOpen(true)}
+                        />
+                        <DocRow
+                          label="Annual inspection"
+                          date={truck.annualInspectionExpiration}
+                          onUpload={() => setUploadOpen(true)}
+                        />
+                      </ul>
+                    </Card>
+                    <DocumentPanel
+                      ownerKind="truck"
+                      ownerId={truckId}
+                      title="All uploaded documents"
+                    />
+                  </div>
                 </TabsContent>
 
                 <TabsContent value="history" className="mt-4">

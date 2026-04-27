@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Upload } from "lucide-react";
 import * as React from "react";
 
@@ -12,6 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { listDrivers } from "@/server/functions/drivers";
+import { listLoadsAdmin } from "@/server/functions/loads";
+import { listTrucks } from "@/server/functions/trucks";
 
 export type UploadOwnerKind = "driver" | "truck" | "load";
 
@@ -60,11 +64,12 @@ interface UploadDocumentDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /**
-   * If provided, locks the owner so the user only picks file + type.
-   * - "driver" with ownerId → only driver_* doc types selectable
-   * - "truck" with ownerId → only truck_* doc types selectable
-   * - "load" with ownerId → only load_* doc types selectable
-   * Omit both to render an "owner kind" picker (used on /admin/documents).
+   * If provided with `ownerId`, locks the owner so the user only picks file + type.
+   * If provided WITHOUT `ownerId`, renders an entity picker scoped to that kind
+   * (used on /admin/documents — Gary picks the driver/truck/load by name instead
+   * of pasting a UUID).
+   * Omit both to render an "owner kind" picker (uncommon — UI normally always
+   * passes at least the kind).
    */
   ownerKind?: UploadOwnerKind;
   ownerId?: string;
@@ -78,7 +83,7 @@ export function UploadDocumentDialog({
   open,
   onOpenChange,
   ownerKind,
-  ownerId,
+  ownerId: lockedOwnerId,
   defaultType,
   onSubmit,
 }: UploadDocumentDialogProps) {
@@ -86,6 +91,7 @@ export function UploadDocumentDialog({
   const [file, setFile] = React.useState<File | null>(null);
   const [expiration, setExpiration] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  const [pickedOwnerId, setPickedOwnerId] = React.useState<string>("");
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
@@ -96,6 +102,7 @@ export function UploadDocumentDialog({
       setFile(null);
       setExpiration("");
       setNotes("");
+      setPickedOwnerId("");
       setError(null);
       setSubmitting(false);
     }
@@ -109,6 +116,68 @@ export function UploadDocumentDialog({
   }, [ownerKind]);
 
   const requiresExpiration = type ? EXPIRABLE.has(type) : false;
+  const needsEntityPicker = !!ownerKind && !lockedOwnerId;
+  const ownerId = lockedOwnerId ?? pickedOwnerId;
+
+  // Fetch the entity options only when the picker is needed and the dialog is open.
+  const driversQuery = useQuery({
+    queryKey: ["picker", "drivers"],
+    queryFn: () => listDrivers({ data: {} }),
+    enabled: open && needsEntityPicker && ownerKind === "driver",
+    staleTime: 30_000,
+  });
+  const trucksQuery = useQuery({
+    queryKey: ["picker", "trucks"],
+    queryFn: () => listTrucks({ data: {} }),
+    enabled: open && needsEntityPicker && ownerKind === "truck",
+    staleTime: 30_000,
+  });
+  const loadsQuery = useQuery({
+    queryKey: ["picker", "loads"],
+    queryFn: () => listLoadsAdmin({ data: {} }),
+    enabled: open && needsEntityPicker && ownerKind === "load",
+    staleTime: 30_000,
+  });
+
+  const entityOptions: { value: string; label: string }[] =
+    React.useMemo(() => {
+      if (!needsEntityPicker) return [];
+      if (ownerKind === "driver") {
+        return (driversQuery.data?.drivers ?? [])
+          .filter((d): d is typeof d & { id: string } => !!d.id)
+          .map((d) => ({
+            value: d.id,
+            label: `${d.firstName ?? ""} ${d.lastName ?? ""}`.trim() || d.email,
+          }));
+      }
+      if (ownerKind === "truck") {
+        return (trucksQuery.data?.trucks ?? [])
+          .filter((t): t is typeof t & { id: string } => !!t.id)
+          .map((t) => ({
+            value: t.id,
+            label: `Unit ${t.unitNumber} — ${t.year} ${t.make} ${t.model}`,
+          }));
+      }
+      if (ownerKind === "load") {
+        return (loadsQuery.data?.loads ?? [])
+          .filter((l): l is typeof l & { id: string; loadNumber: string } =>
+            !!l.id && !!l.loadNumber,
+          )
+          .map((l) => ({ value: l.id, label: l.loadNumber }));
+      }
+      return [];
+    }, [
+      needsEntityPicker,
+      ownerKind,
+      driversQuery.data,
+      trucksQuery.data,
+      loadsQuery.data,
+    ]);
+
+  const entityLoading =
+    (ownerKind === "driver" && driversQuery.isLoading) ||
+    (ownerKind === "truck" && trucksQuery.isLoading) ||
+    (ownerKind === "load" && loadsQuery.isLoading);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -124,8 +193,20 @@ export function UploadDocumentDialog({
       return;
     }
     const resolvedKind = ownerKind ?? ownerKindFromType(type);
-    if (!resolvedKind || !ownerId) {
-      setError("This dialog needs an owner — open it from a driver, truck, or load detail page.");
+    if (!resolvedKind) {
+      setError("Couldn't determine document owner kind.");
+      return;
+    }
+    if (needsEntityPicker && !pickedOwnerId) {
+      setError(
+        `Pick which ${resolvedKind} this document belongs to.`,
+      );
+      return;
+    }
+    if (!ownerId) {
+      setError(
+        "This dialog needs an owner — open it from a driver, truck, or load detail page.",
+      );
       return;
     }
     if (requiresExpiration && !expiration) {
@@ -162,6 +243,43 @@ export function UploadDocumentDialog({
       isSubmitting={submitting}
       banner={error}
     >
+      {needsEntityPicker && (
+        <FormField
+          label={
+            ownerKind === "driver"
+              ? "Driver"
+              : ownerKind === "truck"
+                ? "Truck"
+                : "Load"
+          }
+          required
+          hint={
+            entityOptions.length === 0 && !entityLoading
+              ? `No ${ownerKind}s exist yet — create one first.`
+              : undefined
+          }
+        >
+          <Select value={pickedOwnerId} onValueChange={setPickedOwnerId}>
+            <SelectTrigger>
+              <SelectValue
+                placeholder={
+                  entityLoading
+                    ? "Loading…"
+                    : `Select a ${ownerKind}…`
+                }
+              />
+            </SelectTrigger>
+            <SelectContent>
+              {entityOptions.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FormField>
+      )}
+
       <FormField label="Document type" required>
         <Select value={type} onValueChange={setType}>
           <SelectTrigger>

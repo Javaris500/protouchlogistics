@@ -56,6 +56,7 @@ import {
 import { listLoadsAdmin } from "@/server/functions/loads";
 import { createDocument } from "@/server/functions/documents";
 import { listTrucks, assignTruckToDriver } from "@/server/functions/trucks";
+import { DocumentPanel } from "@/components/common/DocumentPanel";
 import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
 import {
   Dialog,
@@ -328,6 +329,7 @@ function DriverDetailPage() {
                 <TabsList>
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="compliance">Compliance</TabsTrigger>
+                  <TabsTrigger value="documents">Documents</TabsTrigger>
                   <TabsTrigger value="pay">Pay</TabsTrigger>
                   <TabsTrigger value="loads">Loads</TabsTrigger>
                 </TabsList>
@@ -446,6 +448,14 @@ function DriverDetailPage() {
                       />
                     </ul>
                   </Card>
+                </TabsContent>
+
+                <TabsContent value="documents" className="mt-4">
+                  <DocumentPanel
+                    ownerKind="driver"
+                    ownerId={driver.id}
+                    title="All driver documents"
+                  />
                 </TabsContent>
 
                 <TabsContent value="pay" className="mt-4">
