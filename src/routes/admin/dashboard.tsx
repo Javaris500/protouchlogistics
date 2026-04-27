@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import {
   Activity,
@@ -20,14 +21,24 @@ import { Button } from "@/components/ui/button";
 import { ExpirationBadge } from "@/components/ui/expiration-badge";
 import { StatusPill } from "@/components/ui/status-pill";
 import { EMPTY_COPY } from "@/lib/empty-copy";
-import {
-  FIXTURE_ACTIVE_LOADS,
-  FIXTURE_ACTIVITY,
-  FIXTURE_EXPIRING_DOCS,
-  FIXTURE_KPIS,
-  FIXTURE_PENDING_ONBOARDING_COUNT,
-} from "@/lib/fixtures/dashboard";
 import { formatCompactCents, formatRelativeFromNow } from "@/lib/format";
+import { listAudit } from "@/server/functions/audit";
+import { listDocuments } from "@/server/functions/documents";
+import { listPendingApprovals } from "@/server/functions/drivers";
+import { listInvoices } from "@/server/functions/invoices";
+import { listLoadsAdmin } from "@/server/functions/loads";
+
+const ACTIVE_LOAD_STATUSES = [
+  "assigned",
+  "accepted",
+  "en_route_pickup",
+  "at_pickup",
+  "loaded",
+  "en_route_delivery",
+  "at_delivery",
+  "delivered",
+  "pod_uploaded",
+] as const;
 
 export const Route = createFileRoute("/admin/dashboard")({
   component: DashboardPage,
@@ -89,36 +100,57 @@ function DashboardPage() {
 }
 
 function KpiRow() {
-  const k = FIXTURE_KPIS;
+  const loadsQuery = useQuery({
+    queryKey: ["admin", "dashboard", "loads"],
+    queryFn: () =>
+      listLoadsAdmin({ data: { limit: 200, cursor: null } }),
+  });
+  const invoicesQuery = useQuery({
+    queryKey: ["admin", "dashboard", "invoices"],
+    queryFn: () => listInvoices({ data: { limit: 200, cursor: null } }),
+  });
+
+  const loads = loadsQuery.data?.loads ?? [];
+  const invoices = invoicesQuery.data?.invoices ?? [];
+
+  const activeCount = loads.filter((l) =>
+    (ACTIVE_LOAD_STATUSES as readonly string[]).includes(l.status),
+  ).length;
+  const weekStart = Date.now() - 7 * 86_400_000;
+  const completedThisWeek = loads.filter(
+    (l) =>
+      l.status === "completed" &&
+      new Date(l.updatedAt).getTime() >= weekStart,
+  ).length;
+  const arOutstandingCents = invoices
+    .filter((i) => i.status === "sent" || i.status === "overdue")
+    .reduce((sum, i) => sum + i.totalCents, 0);
+
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <KpiCard
         label="Active loads"
-        value={k.activeLoads}
+        value={activeCount}
         sublabel="currently in progress"
         icon={<Activity />}
-        trend={k.trends.activeLoads}
       />
       <KpiCard
         label="Completed this week"
-        value={k.completedThisWeek}
-        sublabel="Mon–Sun"
+        value={completedThisWeek}
+        sublabel="last 7 days"
         icon={<CheckCircle2 />}
-        trend={k.trends.completedThisWeek}
       />
       <KpiCard
         label="Drivers on road"
-        value={k.driversOnRoadNow}
-        sublabel="reporting GPS now"
+        value={0}
+        sublabel="GPS comes in Phase 2"
         icon={<Truck />}
-        trend={k.trends.driversOnRoadNow}
       />
       <KpiCard
         label="AR outstanding"
-        value={formatCompactCents(k.invoicesOutstandingCents)}
+        value={formatCompactCents(arOutstandingCents)}
         sublabel="unpaid invoices"
         icon={<CircleDollarSign />}
-        trend={k.trends.invoicesOutstandingCents}
       />
     </div>
   );
@@ -126,7 +158,7 @@ function KpiRow() {
 
 function LiveMapPreview({ className }: { className?: string }) {
   const copy = EMPTY_COPY["dashboard.liveFleet"];
-  const hasDrivers = FIXTURE_KPIS.driversOnRoadNow > 0;
+  const hasDrivers = false; // GPS lands Phase 2.
   return (
     <Section
       title="Live fleet"
@@ -160,9 +192,7 @@ function LiveMapPreview({ className }: { className?: string }) {
           </div>
           {hasDrivers ? (
             <>
-              <div className="text-sm font-semibold">
-                {FIXTURE_KPIS.driversOnRoadNow} drivers reporting
-              </div>
+              <div className="text-sm font-semibold">Drivers reporting</div>
               <div className="text-xs text-muted-foreground">
                 Live map loads once Mapbox is wired.
               </div>
@@ -182,7 +212,12 @@ function LiveMapPreview({ className }: { className?: string }) {
 }
 
 function OnboardingQueueCard({ className }: { className?: string }) {
-  const count = FIXTURE_PENDING_ONBOARDING_COUNT;
+  const pendingQuery = useQuery({
+    queryKey: ["admin", "dashboard", "pending-approvals"],
+    queryFn: () =>
+      listPendingApprovals({ data: { limit: 50, cursor: null } }),
+  });
+  const count = pendingQuery.data?.drivers.length ?? 0;
   const copy = EMPTY_COPY["dashboard.onboardingQueue"];
   return (
     <Section
@@ -233,7 +268,25 @@ function OnboardingQueueCard({ className }: { className?: string }) {
 }
 
 function ActiveLoadsWidget({ className }: { className?: string }) {
-  const loads = FIXTURE_ACTIVE_LOADS;
+  const activeQuery = useQuery({
+    queryKey: ["admin", "dashboard", "active-loads"],
+    queryFn: () => listLoadsAdmin({ data: { limit: 50, cursor: null } }),
+  });
+  const loads = (activeQuery.data?.loads ?? [])
+    .filter((l) =>
+      (ACTIVE_LOAD_STATUSES as readonly string[]).includes(l.status),
+    )
+    .slice(0, 6)
+    .map((l) => ({
+      id: l.id,
+      loadNumber: l.loadNumber,
+      status: l.status,
+      pickupCity: l.pickup?.city ?? "—",
+      deliveryCity: l.delivery?.city ?? "—",
+      driverName: l.driver
+        ? `${l.driver.firstName} ${l.driver.lastName}`
+        : "Unassigned",
+    }));
   const copy = EMPTY_COPY["dashboard.activeLoads"];
   return (
     <Section
@@ -300,8 +353,107 @@ function ActiveLoadsWidget({ className }: { className?: string }) {
   );
 }
 
+type ExpiringRow =
+  | {
+      id: string;
+      type: string;
+      expirationDate: string;
+      ownerLabel: string;
+      kind: "driver";
+      driverId: string;
+    }
+  | {
+      id: string;
+      type: string;
+      expirationDate: string;
+      ownerLabel: string;
+      kind: "truck";
+      truckId: string;
+    }
+  | {
+      id: string;
+      type: string;
+      expirationDate: string;
+      ownerLabel: string;
+      kind: "load";
+      loadId: string;
+    };
+
+function ExpiringDocLink({ doc }: { doc: ExpiringRow }) {
+  const inner = (
+    <>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-sm font-medium">{doc.ownerLabel}</span>
+        <span className="truncate text-xs text-muted-foreground">
+          {formatDocType(doc.type)}
+        </span>
+      </div>
+      <ExpirationBadge date={doc.expirationDate} />
+    </>
+  );
+  const cn =
+    "flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none";
+  if (doc.kind === "driver") {
+    return (
+      <Link
+        to="/admin/drivers/$driverId"
+        params={{ driverId: doc.driverId }}
+        className={cn}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  if (doc.kind === "truck") {
+    return (
+      <Link
+        to="/admin/trucks/$truckId"
+        params={{ truckId: doc.truckId }}
+        className={cn}
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <Link
+      to="/admin/loads/$loadId"
+      params={{ loadId: doc.loadId }}
+      className={cn}
+    >
+      {inner}
+    </Link>
+  );
+}
+
 function ExpiringSoonWidget({ className }: { className?: string }) {
-  const docs = FIXTURE_EXPIRING_DOCS;
+  const expiringQuery = useQuery({
+    queryKey: ["admin", "dashboard", "expiring-docs"],
+    queryFn: () =>
+      listDocuments({
+        data: { expiringWithinDays: 60, limit: 10, cursor: null },
+      }),
+  });
+  const docs: ExpiringRow[] = (expiringQuery.data?.documents ?? []).flatMap(
+    (d): ExpiringRow[] => {
+      const base = {
+        id: d.id,
+        type: d.type,
+        expirationDate: d.expirationDate ?? "",
+        ownerLabel: d.fileName,
+      };
+      if (d.driverProfileId) {
+        return [{ ...base, kind: "driver", driverId: d.driverProfileId }];
+      }
+      if (d.truckId) {
+        return [{ ...base, kind: "truck", truckId: d.truckId }];
+      }
+      if (d.loadId) {
+        return [{ ...base, kind: "load", loadId: d.loadId }];
+      }
+      return [];
+    },
+  );
   const copy = EMPTY_COPY["dashboard.expiringDocs"];
   return (
     <Section
@@ -331,20 +483,7 @@ function ExpiringSoonWidget({ className }: { className?: string }) {
         <ul className="divide-y divide-border">
           {docs.map((d) => (
             <li key={d.id}>
-              <Link
-                to={d.ownerHref}
-                className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none"
-              >
-                <div className="flex min-w-0 flex-col gap-0.5">
-                  <span className="truncate text-sm font-medium">
-                    {d.ownerLabel}
-                  </span>
-                  <span className="truncate text-xs text-muted-foreground">
-                    {formatDocType(d.type)}
-                  </span>
-                </div>
-                <ExpirationBadge date={d.expirationDate} />
-              </Link>
+              <ExpiringDocLink doc={d} />
             </li>
           ))}
         </ul>
@@ -354,7 +493,17 @@ function ExpiringSoonWidget({ className }: { className?: string }) {
 }
 
 function RecentActivityWidget() {
-  const activity = FIXTURE_ACTIVITY;
+  const auditQuery = useQuery({
+    queryKey: ["admin", "dashboard", "activity"],
+    queryFn: () => listAudit({ data: { limit: 20, cursor: null } }),
+  });
+  const activity = (auditQuery.data?.entries ?? []).map((a) => ({
+    id: a.id,
+    actor: a.actor?.name || a.actor?.email || "System",
+    action: a.action,
+    target: a.entityType,
+    at: a.createdAt,
+  }));
   const copy = EMPTY_COPY["dashboard.activity"];
   return (
     <Section

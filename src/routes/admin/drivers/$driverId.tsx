@@ -1,4 +1,5 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import {
   AlertOctagon,
@@ -21,11 +22,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { toast } from "@/lib/toast";
+import { errorMessage } from "@/lib/errors";
 import { BackLink } from "@/components/common/BackLink";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { CardSkeleton } from "@/components/common/Skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -42,326 +46,473 @@ import { Separator } from "@/components/ui/separator";
 import { StatusPill } from "@/components/ui/status-pill";
 import type { DriverStatus } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { FixtureDriver } from "@/lib/fixtures/drivers";
-import { FIXTURE_DRIVERS, formatPhone } from "@/lib/fixtures/drivers";
-import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
-import { daysUntil, formatMoneyCents } from "@/lib/format";
+import { daysUntil, formatMoneyCents, formatPhone } from "@/lib/format";
+import {
+  approveDriver,
+  getDriver,
+  reinstateDriver,
+  suspendDriver,
+} from "@/server/functions/drivers";
+import { listLoadsAdmin } from "@/server/functions/loads";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/drivers/$driverId")({
-  loader: ({ params }) => {
-    const driver = FIXTURE_DRIVERS.find((d) => d.id === params.driverId);
-    if (!driver) throw notFound();
-    return { driver };
-  },
   component: DriverDetailPage,
 });
 
 function DriverDetailPage() {
-  const { driver } = Route.useLoaderData();
-  const primary = primaryActionFor(driver.status);
+  const { driverId } = Route.useParams();
+  const queryClient = useQueryClient();
   const [suspendOpen, setSuspendOpen] = React.useState(false);
-  const cdlDays = daysUntil(driver.cdlExpiration);
-  const medDays = daysUntil(driver.medicalExpiration);
-  const criticalDays = Math.min(cdlDays, medDays);
+  const [reinstateOpen, setReinstateOpen] = React.useState(false);
 
-  // Period = loads delivered by this driver in the last 14 days. Aggregates
-  // only loads that have driverPayCents set (null = pay not yet entered).
-  const periodStart = Date.now() - 14 * 86_400_000;
-  const driverLoads = FIXTURE_LOADS.filter((l) => l.driver?.id === driver.id);
-  const periodLoads = driverLoads.filter(
-    (l) => new Date(l.updatedAt).getTime() >= periodStart,
-  );
-  const paidLoads = periodLoads.filter((l) => l.driverPayCents !== null);
-  const periodPayCents = paidLoads.reduce(
-    (sum, l) => sum + (l.driverPayCents ?? 0),
-    0,
-  );
+  const driverQuery = useQuery({
+    queryKey: ["admin", "driver", driverId],
+    queryFn: () => getDriver({ data: { driverId } }),
+  });
+
+  const loadsQuery = useQuery({
+    queryKey: ["admin", "driver", driverId, "loads"],
+    queryFn: () =>
+      listLoadsAdmin({ data: { driverId, limit: 100, cursor: null } }),
+    enabled: driverQuery.isSuccess,
+  });
+
+  const suspendMutation = useMutation({
+    mutationFn: ({ id, reason }: { id: string; reason: string }) =>
+      suspendDriver({ data: { driverId: id, reason } }),
+    onSuccess: () => {
+      toast.success("Driver suspended");
+      queryClient.invalidateQueries({ queryKey: ["admin", "driver", driverId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "drivers"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const reinstateMutation = useMutation({
+    mutationFn: (id: string) => reinstateDriver({ data: { driverId: id } }),
+    onSuccess: () => {
+      toast.success("Driver reinstated");
+      queryClient.invalidateQueries({ queryKey: ["admin", "driver", driverId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "drivers"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (id: string) => approveDriver({ data: { driverId: id } }),
+    onSuccess: () => {
+      toast.success("Driver approved");
+      queryClient.invalidateQueries({ queryKey: ["admin", "driver", driverId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "drivers"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
 
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/drivers">Back to drivers</BackLink>
 
-      <section className="animate-enter stagger-1 flex flex-col gap-5">
-        {/* Identity hero — avatar + name + contact chips */}
-        <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
-          <Avatar driver={driver} />
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-                {driver.firstName} {driver.lastName}
-              </h1>
-              <StatusPill kind="driver" status={driver.status} />
-            </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <Phone className="size-3" /> {formatPhone(driver.phone)}
-              </span>
-              <span className="inline-flex items-center gap-1.5 truncate">
-                <Mail className="size-3" /> {driver.email}
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <MapPin className="size-3" /> {driver.city}, {driver.state}
-              </span>
-              {driver.hireDate && (
-                <span className="inline-flex items-center gap-1.5">
-                  <Calendar className="size-3" /> Hired {driver.hireDate}
-                </span>
-              )}
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button
-              variant={primary.variant}
-              size="md"
-              onClick={() => toast.info(`${primary.label} — coming soon`)}
-            >
-              <primary.icon className="size-4" />
-              {primary.label}
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="More actions"
-                  className="rounded-md"
-                >
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>Driver actions</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onSelect={() =>
-                    toast.success(
-                      `2FA reset for ${driver.firstName} ${driver.lastName}`,
-                    )
-                  }
-                >
-                  <ShieldCheck /> Reset 2FA
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onSelect={() => toast.info("Document request — coming soon")}
-                >
-                  <FileText /> Request new doc
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="danger"
-                  onSelect={() => setSuspendOpen(true)}
-                >
-                  <AlertOctagon /> Suspend driver
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </Card>
-
-        <KeyStatStrip
-          stats={[
-            {
-              label: "Loads YTD",
-              value: driver.loadsThisYear.toLocaleString(),
-              sublabel: "delivered this year",
-              mono: true,
-              emphasis: true,
-            },
-            {
-              label: "Pay this period",
-              value:
-                paidLoads.length > 0
-                  ? formatMoneyCents(periodPayCents)
-                  : "—",
-              sublabel:
-                paidLoads.length > 0
-                  ? `${paidLoads.length} load${paidLoads.length === 1 ? "" : "s"} · last 14d`
-                  : "no pay recorded yet",
-              mono: true,
-            },
-            {
-              label: "Next expiration",
-              value: criticalDays < 0 ? "Expired" : `${criticalDays}d`,
-              sublabel: cdlDays < medDays ? "CDL" : "Medical card",
-              mono: true,
-            },
-          ]}
-        />
-      </section>
-
-      <Tabs defaultValue="overview" className="animate-enter stagger-2">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="compliance">Compliance</TabsTrigger>
-          <TabsTrigger value="pay">Pay</TabsTrigger>
-          <TabsTrigger value="loads">Loads</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Panel icon={UserCircle2} title="Contact" className="lg:col-span-2">
-              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-                <Field label="Email" value={driver.email} />
-                <Field label="Phone" value={formatPhone(driver.phone)} mono />
-                <Field
-                  label="Home base"
-                  value={`${driver.city}, ${driver.state}`}
-                />
-                <Field
-                  label="Hire date"
-                  value={driver.hireDate ?? "—"}
-                  mono={!!driver.hireDate}
-                />
-              </dl>
-            </Panel>
-
-            <Panel icon={Truck} title="Assignment">
-              {driver.assignedTruck ? (
-                <div className="flex flex-col gap-3">
-                  <EntityChip
-                    kind="truck"
-                    id={driver.assignedTruck.id}
-                    label={`Unit ${driver.assignedTruck.unitNumber}`}
-                    mono
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    Default truck. Auto-suggested when dispatching new loads.
-                  </p>
-                </div>
-              ) : (
-                <div className="flex flex-col items-start gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    No default truck assigned.
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => toast.info("Assign truck — coming soon")}
-                  >
-                    <Truck className="size-4" /> Assign truck
-                  </Button>
-                </div>
-              )}
-            </Panel>
-
-            <Panel
-              icon={ShieldCheck}
-              title="Compliance at a glance"
-              className="lg:col-span-3"
-            >
-              <div className="grid gap-3 sm:grid-cols-2">
-                <CredentialBlock
-                  title="CDL"
-                  metaLeft={`Class ${driver.cdlClass} · ${driver.cdlState}`}
-                  metaRight={driver.cdlNumber}
-                  metaRightMono
-                  expiration={driver.cdlExpiration}
-                />
-                <CredentialBlock
-                  title="Medical card"
-                  metaLeft="DOT-certified exam"
-                  expiration={driver.medicalExpiration}
-                />
-              </div>
-            </Panel>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="compliance" className="mt-4">
-          <Card className="gap-0 p-0">
-            <ul className="divide-y divide-border">
-              <ComplianceRow
-                icon={ShieldCheck}
-                label="CDL"
-                sublabel={`Class ${driver.cdlClass} · ${driver.cdlState} · ${driver.cdlNumber}`}
-                date={driver.cdlExpiration}
-              />
-              <ComplianceRow
-                icon={ShieldCheck}
-                label="Medical card"
-                sublabel="DOT-certified examiner"
-                date={driver.medicalExpiration}
-              />
-              <MissingDocRow label="MVR" description="Motor vehicle record" />
-              <MissingDocRow
-                label="Drug test"
-                description="Pre-employment + random"
-              />
-            </ul>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="pay" className="mt-4">
-          {paidLoads.length === 0 ? (
-            <EmptyCard
-              icon={Wallet}
-              title="No pay yet this period"
-              description={`Loads completed by ${driver.firstName} over the last 14 days with admin-entered pay will show up here. Per-period settlements roll up to /admin/pay.`}
-            />
-          ) : (
-            <Card className="gap-0 p-0">
-              <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
-                <div className="flex flex-col gap-0.5">
-                  <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-                    Pay this period
-                  </span>
-                  <span className="text-xs text-muted-foreground">
-                    Last 14 days · {paidLoads.length} load
-                    {paidLoads.length === 1 ? "" : "s"} with pay set
-                  </span>
-                </div>
-                <span className="font-mono text-2xl font-bold tabular-nums">
-                  {formatMoneyCents(periodPayCents)}
-                </span>
-              </div>
-              <ul className="divide-y divide-border">
-                {paidLoads.map((l) => (
-                  <li
-                    key={l.id}
-                    className="flex items-center justify-between gap-3 px-5 py-3"
-                  >
-                    <div className="flex min-w-0 flex-col">
-                      <span className="font-mono text-sm font-semibold">
-                        {l.loadNumber}
-                      </span>
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {l.pickup.city}, {l.pickup.state} → {l.delivery.city},{" "}
-                        {l.delivery.state}
-                      </span>
-                    </div>
-                    <span className="font-mono text-sm font-semibold tabular-nums">
-                      {formatMoneyCents(l.driverPayCents ?? 0)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="loads" className="mt-4">
-          <EmptyCard
-            icon={Truck}
-            title="No recent loads"
-            description={`Loads delivered by ${driver.firstName} appear here — most recent first. Filter by status, broker, or date range.`}
-          />
-        </TabsContent>
-      </Tabs>
-
-      <ConfirmDialog
-        open={suspendOpen}
-        onOpenChange={setSuspendOpen}
-        tone="danger"
-        title={`Suspend ${driver.firstName} ${driver.lastName}?`}
-        description="They'll lose dispatch access immediately and won't appear in driver pickers. You can reinstate them later from this page."
-        confirmLabel="Suspend driver"
-        onConfirm={() => {
-          toast.success(
-            `${driver.firstName} ${driver.lastName} suspended`,
+      <QueryBoundary
+        query={driverQuery}
+        skeleton={<CardSkeleton />}
+        errorTitle="Couldn't load driver"
+      >
+        {(detail) => {
+          const driver = detail.driver;
+          const userStatus = (detail.driver.userStatus ?? "active") as DriverStatus;
+          const fullName =
+            [driver.firstName, driver.lastName].filter(Boolean).join(" ") ||
+            driver.email;
+          const cdlDays = daysUntil(driver.cdlExpiration);
+          const medDays = daysUntil(driver.medicalCardExpiration);
+          const criticalDays = Math.min(cdlDays, medDays);
+          const periodLoads =
+            loadsQuery.data?.loads.filter(
+              (l) =>
+                new Date(l.updatedAt).getTime() >=
+                Date.now() - 14 * 86_400_000,
+            ) ?? [];
+          const paidLoads = periodLoads.filter(
+            (l) => l.driverPayCents != null,
           );
-          setSuspendOpen(false);
+          const periodPayCents = paidLoads.reduce(
+            (sum, l) => sum + (l.driverPayCents ?? 0),
+            0,
+          );
+          const primary = primaryActionFor(userStatus);
+
+          const onPrimary = () => {
+            if (userStatus === "pending_approval")
+              approveMutation.mutate(driver.id);
+            else if (userStatus === "suspended") setReinstateOpen(true);
+            else toast.info(`${primary.label} — coming soon`);
+          };
+
+          return (
+            <>
+              <section className="animate-enter stagger-1 flex flex-col gap-5">
+                <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
+                  <Avatar
+                    first={driver.firstName ?? driver.email}
+                    last={driver.lastName ?? ""}
+                  />
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+                        {fullName}
+                      </h1>
+                      <StatusPill kind="driver" status={userStatus} />
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                      {driver.phone && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Phone className="size-3" />{" "}
+                          {formatPhone(driver.phone)}
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1.5 truncate">
+                        <Mail className="size-3" /> {driver.email}
+                      </span>
+                      {driver.city && driver.state && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <MapPin className="size-3" /> {driver.city},{" "}
+                          {driver.state}
+                        </span>
+                      )}
+                      {driver.hireDate && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Calendar className="size-3" /> Hired{" "}
+                          {driver.hireDate}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      variant={primary.variant}
+                      size="md"
+                      onClick={onPrimary}
+                      disabled={
+                        approveMutation.isPending ||
+                        reinstateMutation.isPending
+                      }
+                    >
+                      <primary.icon className="size-4" />
+                      {primary.label}
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          aria-label="More actions"
+                          className="rounded-md"
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuLabel>Driver actions</DropdownMenuLabel>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            toast.info("Document request — coming soon")
+                          }
+                        >
+                          <FileText /> Request new doc
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {userStatus !== "suspended" ? (
+                          <DropdownMenuItem
+                            variant="danger"
+                            onSelect={() => setSuspendOpen(true)}
+                          >
+                            <AlertOctagon /> Suspend driver
+                          </DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            onSelect={() => setReinstateOpen(true)}
+                          >
+                            <UserCog /> Reinstate
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </Card>
+
+                <KeyStatStrip
+                  stats={[
+                    {
+                      label: "Loads YTD",
+                      value: detail.stats.completedLoadsThisYear.toLocaleString(),
+                      sublabel: "delivered this year",
+                      mono: true,
+                      emphasis: true,
+                    },
+                    {
+                      label: "Pay this period",
+                      value:
+                        paidLoads.length > 0
+                          ? formatMoneyCents(periodPayCents)
+                          : "—",
+                      sublabel:
+                        paidLoads.length > 0
+                          ? `${paidLoads.length} load${paidLoads.length === 1 ? "" : "s"} · last 14d`
+                          : "no pay recorded yet",
+                      mono: true,
+                    },
+                    {
+                      label: "Next expiration",
+                      value:
+                        criticalDays < 0 ? "Expired" : `${criticalDays}d`,
+                      sublabel: cdlDays < medDays ? "CDL" : "Medical card",
+                      mono: true,
+                    },
+                  ]}
+                />
+              </section>
+
+              <Tabs defaultValue="overview" className="animate-enter stagger-2">
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="compliance">Compliance</TabsTrigger>
+                  <TabsTrigger value="pay">Pay</TabsTrigger>
+                  <TabsTrigger value="loads">Loads</TabsTrigger>
+                </TabsList>
+
+                <TabsContent value="overview" className="mt-4">
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <Panel
+                      icon={UserCircle2}
+                      title="Contact"
+                      className="lg:col-span-2"
+                    >
+                      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                        <Field label="Email" value={driver.email} />
+                        <Field
+                          label="Phone"
+                          value={driver.phone ? formatPhone(driver.phone) : "—"}
+                          mono={!!driver.phone}
+                        />
+                        <Field
+                          label="Home base"
+                          value={
+                            driver.city && driver.state
+                              ? `${driver.city}, ${driver.state}`
+                              : "—"
+                          }
+                        />
+                        <Field
+                          label="Hire date"
+                          value={driver.hireDate ?? "—"}
+                          mono={!!driver.hireDate}
+                        />
+                      </dl>
+                    </Panel>
+
+                    <Panel icon={Truck} title="Assignment">
+                      {detail.assignedTruck ? (
+                        <div className="flex flex-col gap-3">
+                          <EntityChip
+                            kind="truck"
+                            id={detail.assignedTruck.id}
+                            label={`Unit ${detail.assignedTruck.unitNumber}`}
+                            mono
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Default truck. Auto-suggested when dispatching new
+                            loads.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-start gap-3">
+                          <p className="text-sm text-muted-foreground">
+                            No default truck assigned.
+                          </p>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              toast.info("Assign truck — coming soon")
+                            }
+                          >
+                            <Truck className="size-4" /> Assign truck
+                          </Button>
+                        </div>
+                      )}
+                    </Panel>
+
+                    <Panel
+                      icon={ShieldCheck}
+                      title="Compliance at a glance"
+                      className="lg:col-span-3"
+                    >
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <CredentialBlock
+                          title="CDL"
+                          metaLeft={`Class ${driver.cdlClass} · ${driver.cdlState}`}
+                          metaRight={driver.cdlNumber}
+                          metaRightMono
+                          expiration={driver.cdlExpiration}
+                        />
+                        <CredentialBlock
+                          title="Medical card"
+                          metaLeft="DOT-certified exam"
+                          expiration={driver.medicalCardExpiration}
+                        />
+                      </div>
+                    </Panel>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="compliance" className="mt-4">
+                  <Card className="gap-0 p-0">
+                    <ul className="divide-y divide-border">
+                      <ComplianceRow
+                        icon={ShieldCheck}
+                        label="CDL"
+                        sublabel={`Class ${driver.cdlClass} · ${driver.cdlState} · ${driver.cdlNumber}`}
+                        date={driver.cdlExpiration}
+                      />
+                      <ComplianceRow
+                        icon={ShieldCheck}
+                        label="Medical card"
+                        sublabel="DOT-certified examiner"
+                        date={driver.medicalCardExpiration}
+                      />
+                      <MissingDocRow
+                        label="MVR"
+                        description="Motor vehicle record"
+                      />
+                      <MissingDocRow
+                        label="Drug test"
+                        description="Pre-employment + random"
+                      />
+                    </ul>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="pay" className="mt-4">
+                  {paidLoads.length === 0 ? (
+                    <EmptyCard
+                      icon={Wallet}
+                      title="No pay yet this period"
+                      description={`Loads completed by ${driver.firstName ?? "this driver"} over the last 14 days with admin-entered pay will show up here. Per-period settlements roll up to /admin/pay.`}
+                    />
+                  ) : (
+                    <Card className="gap-0 p-0">
+                      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                            Pay this period
+                          </span>
+                          <span className="text-xs text-muted-foreground">
+                            Last 14 days · {paidLoads.length} load
+                            {paidLoads.length === 1 ? "" : "s"} with pay set
+                          </span>
+                        </div>
+                        <span className="font-mono text-2xl font-bold tabular-nums">
+                          {formatMoneyCents(periodPayCents)}
+                        </span>
+                      </div>
+                      <ul className="divide-y divide-border">
+                        {paidLoads.map((l) => (
+                          <li
+                            key={l.id}
+                            className="flex items-center justify-between gap-3 px-5 py-3"
+                          >
+                            <div className="flex min-w-0 flex-col">
+                              <span className="font-mono text-sm font-semibold">
+                                {l.loadNumber}
+                              </span>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {l.pickup
+                                  ? `${l.pickup.city}, ${l.pickup.state}`
+                                  : "—"}{" "}
+                                →{" "}
+                                {l.delivery
+                                  ? `${l.delivery.city}, ${l.delivery.state}`
+                                  : "—"}
+                              </span>
+                            </div>
+                            <span className="font-mono text-sm font-semibold tabular-nums">
+                              {formatMoneyCents(l.driverPayCents ?? 0)}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="loads" className="mt-4">
+                  {loadsQuery.data && loadsQuery.data.loads.length > 0 ? (
+                    <Card className="gap-0 p-0">
+                      <ul className="divide-y divide-border">
+                        {loadsQuery.data.loads.map((l) => (
+                          <li
+                            key={l.id}
+                            className="flex items-center justify-between gap-3 px-5 py-3"
+                          >
+                            <div className="flex min-w-0 flex-col">
+                              <span className="font-mono text-sm font-semibold">
+                                {l.loadNumber}
+                              </span>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {l.broker.companyName}
+                              </span>
+                            </div>
+                            <StatusPill kind="load" status={l.status} />
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  ) : (
+                    <EmptyCard
+                      icon={Truck}
+                      title="No recent loads"
+                      description={`Loads delivered by ${driver.firstName ?? "this driver"} appear here — most recent first.`}
+                    />
+                  )}
+                </TabsContent>
+              </Tabs>
+
+              <ConfirmDialog
+                open={suspendOpen}
+                onOpenChange={setSuspendOpen}
+                tone="danger"
+                title={`Suspend ${fullName}?`}
+                description="They'll lose dispatch access immediately and won't appear in driver pickers. You can reinstate them later from this page."
+                confirmLabel="Suspend driver"
+                input={{
+                  label: "Reason",
+                  placeholder: "e.g. failed compliance check",
+                  required: true,
+                }}
+                onConfirm={(reason) => {
+                  if (!reason) return;
+                  suspendMutation.mutate({ id: driver.id, reason });
+                  setSuspendOpen(false);
+                }}
+              />
+
+              <ConfirmDialog
+                open={reinstateOpen}
+                onOpenChange={setReinstateOpen}
+                tone="primary"
+                title={`Reinstate ${fullName}?`}
+                description="They'll appear in driver pickers again and can be dispatched on new loads."
+                confirmLabel="Reinstate driver"
+                onConfirm={() => {
+                  reinstateMutation.mutate(driver.id);
+                  setReinstateOpen(false);
+                }}
+              />
+            </>
+          );
         }}
-      />
+      </QueryBoundary>
     </div>
   );
 }
@@ -370,9 +521,8 @@ function DriverDetailPage() {
 /*  Avatar                                                                    */
 /* -------------------------------------------------------------------------- */
 
-function Avatar({ driver }: { driver: FixtureDriver }) {
-  const initials =
-    `${driver.firstName[0] ?? ""}${driver.lastName[0] ?? ""}`.toUpperCase();
+function Avatar({ first, last }: { first: string; last: string }) {
+  const initials = `${first[0] ?? ""}${last[0] ?? ""}`.toUpperCase();
   return (
     <div
       aria-hidden="true"
@@ -387,10 +537,6 @@ function Avatar({ driver }: { driver: FixtureDriver }) {
     </div>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Credential block — compact block for the Overview's at-a-glance strip     */
-/* -------------------------------------------------------------------------- */
 
 function CredentialBlock({
   title,
@@ -438,10 +584,6 @@ function CredentialBlock({
     </div>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Compliance tab rows                                                        */
-/* -------------------------------------------------------------------------- */
 
 function ComplianceRow({
   icon: Icon,
@@ -525,10 +667,6 @@ function MissingDocRow({
     </li>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Shared primitives                                                         */
-/* -------------------------------------------------------------------------- */
 
 interface PrimaryAction {
   label: string;

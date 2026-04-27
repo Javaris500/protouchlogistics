@@ -1,4 +1,5 @@
 import * as React from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   ArrowRight,
@@ -26,10 +27,13 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-import { FIXTURE_DRIVERS } from "@/lib/fixtures/drivers";
-import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
-import { FIXTURE_TRUCKS } from "@/lib/fixtures/trucks";
+import { errorMessage } from "@/lib/errors";
+import { toast } from "@/lib/toast";
 import { US_STATES } from "@/lib/onboarding/us-states";
+import { listBrokers } from "@/server/functions/brokers";
+import { listDrivers } from "@/server/functions/drivers";
+import { listTrucks } from "@/server/functions/trucks";
+import { assignLoad, createLoad } from "@/server/functions/loads";
 
 export const Route = createFileRoute("/admin/loads/new")({
   component: NewLoadPage,
@@ -126,6 +130,49 @@ type Errors = Partial<
 /*  Component                                                                 */
 /* -------------------------------------------------------------------------- */
 
+interface ServerStop {
+  stopType: "pickup" | "delivery";
+  sequence: number;
+  companyName: string | null;
+  addressLine1: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lng: number;
+  windowStart: string;
+  windowEnd: string;
+  contactName: string | null;
+  contactPhone: string | null;
+  notes: string | null;
+}
+
+function toServerStop(
+  kind: "pickup" | "delivery",
+  sequence: number,
+  s: StopDraft,
+): ServerStop {
+  return {
+    stopType: kind,
+    sequence,
+    companyName: s.companyName.trim() || null,
+    addressLine1: s.line1.trim(),
+    city: s.city.trim(),
+    state: s.state,
+    zip: s.zip.trim(),
+    // Lat/lng are not collected by the form yet; default to 0,0. Geocoding
+    // is a Phase 2 concern. The DB column is decimal NOT NULL, so we must
+    // send a number — zeros are visually meaningless but typecheck-safe.
+    lat: 0,
+    lng: 0,
+    windowStart: new Date(s.windowStart).toISOString(),
+    windowEnd: new Date(s.windowEnd).toISOString(),
+    contactName: s.contactName.trim() || null,
+    contactPhone: s.contactPhone.trim() || null,
+    notes: s.notes.trim() || null,
+  };
+}
+
 function NewLoadPage() {
   const navigate = useNavigate();
   const [form, setForm] = React.useState<LoadDraft>(INITIAL);
@@ -134,30 +181,33 @@ function NewLoadPage() {
   const [confirmPayOpen, setConfirmPayOpen] = React.useState(false);
   const payInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Dedup brokers from fixture loads (no separate broker fixture yet).
-  const brokers = React.useMemo(() => {
-    const map = new Map<string, { id: string; companyName: string }>();
-    for (const l of FIXTURE_LOADS) map.set(l.broker.id, l.broker);
-    return Array.from(map.values()).sort((a, b) =>
-      a.companyName.localeCompare(b.companyName),
-    );
-  }, []);
+  const brokersQuery = useQuery({
+    queryKey: ["admin", "brokers", "picker"],
+    queryFn: () => listBrokers({ data: { limit: 200, cursor: null } }),
+  });
+  const driversQuery = useQuery({
+    queryKey: ["admin", "drivers", "picker"],
+    queryFn: () =>
+      listDrivers({
+        data: { status: "active", limit: 200, cursor: null },
+      }),
+  });
+  const trucksQuery = useQuery({
+    queryKey: ["admin", "trucks", "picker"],
+    queryFn: () =>
+      listTrucks({ data: { status: "active", limit: 200, cursor: null } }),
+  });
 
-  const activeDrivers = React.useMemo(
-    () => FIXTURE_DRIVERS.filter((d) => d.status === "active"),
-    [],
+  const brokers = brokersQuery.data?.brokers ?? [];
+  const activeDrivers = (driversQuery.data?.drivers ?? []).filter(
+    (d): d is typeof d & { id: string } => d.id !== null,
   );
-  const activeTrucks = React.useMemo(
-    () => FIXTURE_TRUCKS.filter((t) => t.status === "active"),
-    [],
-  );
+  const activeTrucks = trucksQuery.data?.trucks ?? [];
 
   const selectedDriver = activeDrivers.find(
     (d) => d.id === form.assignedDriverId,
   );
 
-  // When the driver changes, auto-suggest their default truck if any and
-  // nothing has been picked yet.
   React.useEffect(() => {
     if (!selectedDriver) return;
     if (selectedDriver.assignedTruck && !form.assignedTruckId) {
@@ -223,23 +273,89 @@ function NewLoadPage() {
   const driverAssignedWithoutPay =
     !!form.assignedDriverId && form.driverPayDollars.trim() === "";
 
-  const finalizeSubmit = () => {
+  type CreateLoadInput = {
+    loadNumber: string;
+    brokerId: string;
+    status: "draft";
+    rateCents: number;
+    miles: number | null;
+    commodity: string;
+    weight: number | null;
+    pieces: number | null;
+    specialInstructions: string | null;
+    referenceNumber: string | null;
+    bolNumber: string | null;
+    driverPayCents: number | null;
+    stops: ServerStop[];
+  };
+  const createMutation = useMutation({
+    mutationFn: (input: CreateLoadInput) => createLoad({ data: input }),
+  });
+  const assignMutation = useMutation({
+    mutationFn: ({
+      loadId,
+      driverId,
+      truckId,
+    }: {
+      loadId: string;
+      driverId: string;
+      truckId: string | null;
+    }) => assignLoad({ data: { loadId, driverId, truckId } }),
+  });
+
+  const finalizeSubmit = async () => {
     setSubmitting(true);
-    const payCents =
-      form.driverPayDollars.trim() === ""
-        ? null
-        : Math.round(Number(form.driverPayDollars) * 100);
-    // Stubbed submit — replace with createLoad server function.
-    // eslint-disable-next-line no-console
-    console.info("[createLoad:stub]", {
-      ...form,
-      rateCents: Math.round(Number(form.rateDollars) * 100),
-      driverPayCents: payCents,
-      status: form.assignedDriverId ? "assigned" : "draft",
-    });
-    window.setTimeout(() => {
-      navigate({ to: "/admin/loads" });
-    }, 600);
+    try {
+      const payCents =
+        form.driverPayDollars.trim() === ""
+          ? null
+          : Math.round(Number(form.driverPayDollars) * 100);
+      const rateCents = Math.round(Number(form.rateDollars) * 100);
+      const miles = form.miles ? Number(form.miles) : null;
+      const weight = form.weight ? Number(form.weight) : null;
+      const pieces = form.pieces ? Number(form.pieces) : null;
+
+      const loadNumber = `PTL-${new Date().getFullYear()}-${Math.random()
+        .toString(36)
+        .slice(2, 7)
+        .toUpperCase()}`;
+
+      const stops = [
+        toServerStop("pickup", 0, form.pickup),
+        toServerStop("delivery", 1, form.delivery),
+      ];
+
+      const { load: created } = await createMutation.mutateAsync({
+        loadNumber,
+        brokerId: form.brokerId,
+        status: "draft",
+        rateCents,
+        miles,
+        commodity: form.commodity.trim(),
+        weight,
+        pieces,
+        specialInstructions: form.specialInstructions.trim() || null,
+        referenceNumber: form.referenceNumber.trim() || null,
+        bolNumber: form.bolNumber.trim() || null,
+        driverPayCents: payCents,
+        stops,
+      });
+
+      if (form.assignedDriverId) {
+        await assignMutation.mutateAsync({
+          loadId: created.id,
+          driverId: form.assignedDriverId,
+          truckId: form.assignedTruckId || null,
+        });
+      }
+
+      toast.success(`Load ${created.loadNumber} created`);
+      navigate({ to: "/admin/loads/$loadId", params: { loadId: created.id } });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const handleSubmit = (ev: React.FormEvent) => {
@@ -455,14 +571,14 @@ function NewLoadPage() {
           <FormField
             label="Driver"
             meta={
-              selectedDriver && (
+              selectedDriver?.cdlClass && selectedDriver.cdlState ? (
                 <span className="font-mono text-[11px]">
                   {selectedDriver.cdlClass} · {selectedDriver.cdlState}
                 </span>
-              )
+              ) : undefined
             }
             hint={
-              selectedDriver
+              selectedDriver?.city && selectedDriver?.state
                 ? `${selectedDriver.city}, ${selectedDriver.state}`
                 : "Only active drivers listed"
             }
@@ -486,7 +602,8 @@ function NewLoadPage() {
                   <SelectItem key={d.id} value={d.id}>
                     <span className="inline-flex items-center gap-2">
                       <UserRound className="size-3.5 text-muted-foreground" />
-                      {d.firstName} {d.lastName}
+                      {[d.firstName, d.lastName].filter(Boolean).join(" ") ||
+                        d.email}
                       {d.assignedTruck && (
                         <span className="text-[11px] text-muted-foreground">
                           · #{d.assignedTruck.unitNumber}

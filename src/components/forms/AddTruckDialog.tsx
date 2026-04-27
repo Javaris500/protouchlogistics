@@ -25,6 +25,9 @@ interface AddTruckValues {
   plateState: string;
   status: TruckStatus;
   currentMileage: string;
+  registrationExpiration: string;
+  insuranceExpiration: string;
+  annualInspectionExpiration: string;
   notes: string;
 }
 
@@ -81,6 +84,13 @@ export function AddTruckDialog({
     const miles = Number.parseInt(values.currentMileage, 10);
     if (values.currentMileage && (Number.isNaN(miles) || miles < 0))
       next.currentMileage = "Mileage must be a positive number.";
+    if (!values.registrationExpiration)
+      next.registrationExpiration = "Registration expiration is required.";
+    if (!values.insuranceExpiration)
+      next.insuranceExpiration = "Insurance expiration is required.";
+    if (!values.annualInspectionExpiration)
+      next.annualInspectionExpiration =
+        "Annual inspection expiration is required.";
     setErrors(next);
     return Object.keys(next).length === 0;
   }
@@ -239,6 +249,47 @@ export function AddTruckDialog({
         </FormField>
       </div>
 
+      <div className="grid gap-4 sm:grid-cols-3">
+        <FormField
+          label="Registration expires"
+          required
+          error={errors.registrationExpiration}
+        >
+          <Input
+            type="date"
+            value={values.registrationExpiration}
+            onChange={(e) => update("registrationExpiration", e.target.value)}
+            disabled={isSubmitting}
+          />
+        </FormField>
+        <FormField
+          label="Insurance expires"
+          required
+          error={errors.insuranceExpiration}
+        >
+          <Input
+            type="date"
+            value={values.insuranceExpiration}
+            onChange={(e) => update("insuranceExpiration", e.target.value)}
+            disabled={isSubmitting}
+          />
+        </FormField>
+        <FormField
+          label="Inspection expires"
+          required
+          error={errors.annualInspectionExpiration}
+        >
+          <Input
+            type="date"
+            value={values.annualInspectionExpiration}
+            onChange={(e) =>
+              update("annualInspectionExpiration", e.target.value)
+            }
+            disabled={isSubmitting}
+          />
+        </FormField>
+      </div>
+
       <FormField
         label="Notes"
         meta={<span>Optional · admin-only</span>}
@@ -266,5 +317,8 @@ const initial: AddTruckValues = {
   plateState: "",
   status: "active",
   currentMileage: "",
+  registrationExpiration: "",
+  insuranceExpiration: "",
+  annualInspectionExpiration: "",
   notes: "",
 };

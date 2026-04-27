@@ -1,12 +1,13 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
-import { Receipt } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 
 import { BackLink } from "@/components/common/BackLink";
-import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
-import { Button } from "@/components/ui/button";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { CardSkeleton } from "@/components/common/Skeleton";
 import { Card } from "@/components/ui/card";
-import { FIXTURE_INVOICES } from "@/lib/fixtures/invoices";
+import { formatMoneyCents } from "@/lib/format";
+import { getInvoice } from "@/server/functions/invoices";
 
 export const Route = createFileRoute("/admin/invoices/$invoiceId")({
   component: InvoiceDetailPage,
@@ -14,36 +15,72 @@ export const Route = createFileRoute("/admin/invoices/$invoiceId")({
 
 function InvoiceDetailPage() {
   const { invoiceId } = Route.useParams();
-  const invoice = FIXTURE_INVOICES.find((i) => i.id === invoiceId);
 
-  if (!invoice) {
-    return (
-      <div className="flex flex-col gap-5">
-        <BackLink to="/admin/invoices">Back to invoices</BackLink>
-        <PageHeader eyebrow="Invoice" title="Invoice not found" />
-        <Card className="p-6">
-          <EmptyState
-            icon={Receipt}
-            variant="first-time"
-            title="We couldn't find that invoice"
-            description="It may have been voided, or the link is out of date. Head back to the invoices list to pick another one or start a new one."
-            action={
-              <Button asChild variant="primary" size="sm">
-                <Link to="/admin/invoices">Back to invoices</Link>
-              </Button>
-            }
-          />
-        </Card>
-      </div>
-    );
-  }
+  const invoiceQuery = useQuery({
+    queryKey: ["admin", "invoice", invoiceId],
+    queryFn: () => getInvoice({ data: { invoiceId } }),
+  });
 
-  // Kept as a guard; FIXTURE_INVOICES is currently empty so this branch is
-  // unreachable until real data lands.
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/invoices">Back to invoices</BackLink>
-      <PageHeader eyebrow="Invoice" title={invoice.invoiceNumber} />
+
+      <QueryBoundary
+        query={invoiceQuery}
+        skeleton={<CardSkeleton />}
+        errorTitle="Couldn't load invoice"
+      >
+        {(detail) => (
+          <>
+            <PageHeader
+              eyebrow="Invoice"
+              title={detail.invoice.invoiceNumber}
+              description={detail.broker?.companyName ?? undefined}
+            />
+            <Card className="flex flex-col gap-3 p-5">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
+                  Total
+                </span>
+                <span className="font-mono text-2xl font-bold tabular-nums">
+                  {formatMoneyCents(detail.invoice.totalCents)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Status</span>
+                <span className="font-medium capitalize">
+                  {detail.invoice.status}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Issued</span>
+                <span className="font-mono">{detail.invoice.issueDate}</span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">Due</span>
+                <span className="font-mono">{detail.invoice.dueDate}</span>
+              </div>
+            </Card>
+            {detail.lineItems.length > 0 && (
+              <Card className="gap-0 p-0">
+                <ul className="divide-y divide-border">
+                  {detail.lineItems.map((li) => (
+                    <li
+                      key={li.id}
+                      className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"
+                    >
+                      <span className="text-sm">{li.description}</span>
+                      <span className="font-mono text-sm font-semibold tabular-nums">
+                        {formatMoneyCents(li.amountCents)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Card>
+            )}
+          </>
+        )}
+      </QueryBoundary>
     </div>
   );
 }

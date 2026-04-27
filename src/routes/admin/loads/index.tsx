@@ -1,18 +1,20 @@
+import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
-import { toast } from "@/lib/toast";
-import { toCsv, downloadCsv } from "@/lib/csv";
 import {
   Columns3,
   Download,
   List,
-  PackagePlus,
   Plus,
   Truck,
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { EmptyState } from "@/components/common/EmptyState";
+import { toast } from "@/lib/toast";
+import { downloadCsv, toCsv } from "@/lib/csv";
+
 import { PageHeader } from "@/components/common/PageHeader";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { TableSkeleton } from "@/components/common/Skeleton";
 import { ViewSwitcher } from "@/components/common/ViewSwitcher";
 import { FilterChips } from "@/components/data/FilterChips";
 import { Pagination } from "@/components/data/Pagination";
@@ -38,9 +40,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EMPTY_COPY } from "@/lib/empty-copy";
-import { FIXTURE_LOADS, type FixtureLoad } from "@/lib/fixtures/loads";
 import { formatDateShort, formatMoneyCents } from "@/lib/format";
+import { listBrokers } from "@/server/functions/brokers";
+import { listLoadsAdmin } from "@/server/functions/loads";
+
+type LoadRow = NonNullable<
+  Awaited<ReturnType<typeof listLoadsAdmin>>["loads"][number]
+>;
 
 export const Route = createFileRoute("/admin/loads/")({
   component: LoadsListPage,
@@ -83,7 +89,6 @@ const PAGE_SIZE = 10;
 
 type ViewMode = "table" | "board";
 
-/** Board columns — logical groupings of the load status flow. */
 const BOARD_COLUMNS: {
   id: string;
   label: string;
@@ -130,23 +135,36 @@ function LoadsListPage() {
   const [page, setPage] = useState(1);
   const [view, setView] = useState<ViewMode>("table");
 
-  const brokerOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const l of FIXTURE_LOADS) map.set(l.broker.id, l.broker.companyName);
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, []);
+  const loadsQuery = useQuery({
+    queryKey: ["admin", "loads", { broker }],
+    queryFn: () =>
+      listLoadsAdmin({
+        data: {
+          brokerId: broker === "all" ? undefined : broker,
+          limit: 200,
+          cursor: null,
+        },
+      }),
+  });
+
+  const brokersQuery = useQuery({
+    queryKey: ["admin", "brokers", "filter-list"],
+    queryFn: () =>
+      listBrokers({ data: { limit: 200, cursor: null } }),
+  });
+
+  const allRows = loadsQuery.data?.loads ?? [];
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return FIXTURE_LOADS.filter((l) => {
+    return allRows.filter((l) => {
       if (!STATUS_GROUPS[status].has(l.status)) return false;
-      if (broker !== "all" && l.broker.id !== broker) return false;
       if (q) {
         const haystack = [
           l.loadNumber,
           l.referenceNumber ?? "",
-          l.pickup.city,
-          l.delivery.city,
+          l.pickup?.city ?? "",
+          l.delivery?.city ?? "",
           l.driver ? `${l.driver.firstName} ${l.driver.lastName}` : "",
           l.broker.companyName,
         ]
@@ -156,19 +174,19 @@ function LoadsListPage() {
       }
       return true;
     });
-  }, [status, broker, search]);
+  }, [allRows, status, search]);
 
   const counts = useMemo(() => {
     const compute = (filter: StatusFilter) =>
-      FIXTURE_LOADS.filter((l) => STATUS_GROUPS[filter].has(l.status)).length;
+      allRows.filter((l) => STATUS_GROUPS[filter].has(l.status)).length;
     return {
-      all: FIXTURE_LOADS.length,
+      all: allRows.length,
       active: compute("active"),
       draft: compute("draft"),
       completed: compute("completed"),
       cancelled: compute("cancelled"),
     };
-  }, []);
+  }, [allRows]);
 
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
@@ -189,13 +207,18 @@ function LoadsListPage() {
                     load_number: l.loadNumber,
                     status: l.status,
                     broker: l.broker.companyName,
-                    pickup: `${l.pickup.city}, ${l.pickup.state}`,
-                    delivery: `${l.delivery.city}, ${l.delivery.state}`,
+                    pickup: l.pickup
+                      ? `${l.pickup.city}, ${l.pickup.state}`
+                      : "",
+                    delivery: l.delivery
+                      ? `${l.delivery.city}, ${l.delivery.state}`
+                      : "",
                     driver: l.driver
                       ? `${l.driver.firstName} ${l.driver.lastName}`
                       : "",
                     truck: l.truck?.unitNumber ?? "",
                     rate_cents: l.rateCents,
+                    driver_pay_cents: l.driverPayCents ?? "",
                     miles: l.miles ?? "",
                     reference: l.referenceNumber ?? "",
                   })),
@@ -262,9 +285,9 @@ function LoadsListPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All brokers</SelectItem>
-                {brokerOptions.map((b) => (
+                {(brokersQuery.data?.brokers ?? []).map((b) => (
                   <SelectItem key={b.id} value={b.id}>
-                    {b.name}
+                    {b.companyName}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -292,50 +315,60 @@ function LoadsListPage() {
           </div>
         </div>
 
-        {filtered.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              icon={PackagePlus}
-              variant={EMPTY_COPY["loads.filter"].variant}
-              title={EMPTY_COPY["loads.filter"].title}
-              description={EMPTY_COPY["loads.filter"].description}
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setStatus("all");
-                    setBroker("all");
-                    setSearch("");
-                    setPage(1);
-                  }}
-                >
-                  {EMPTY_COPY["loads.filter"].ctaLabel}
-                </Button>
-              }
-            />
-          </div>
-        ) : view === "table" ? (
-          <>
-            <LoadsTable rows={pageRows} />
-            <div className="border-t border-border p-3">
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filtered.length}
-                onPageChange={setPage}
-              />
-            </div>
-          </>
-        ) : (
-          <LoadsBoard rows={filtered} />
-        )}
+        <QueryBoundary
+          query={loadsQuery}
+          emptyKey={
+            allRows.length === 0 ? "loads.firstTime" : "loads.filter"
+          }
+          isEmpty={() => filtered.length === 0}
+          skeleton={<TableSkeleton rows={PAGE_SIZE} cols={8} className="m-3" />}
+          emptyAction={
+            allRows.length === 0 ? (
+              <Button asChild variant="primary" size="sm">
+                <Link to="/admin/loads/new">
+                  <Plus className="size-4" /> New load
+                </Link>
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setStatus("all");
+                  setBroker("all");
+                  setSearch("");
+                  setPage(1);
+                }}
+              >
+                Clear filters
+              </Button>
+            )
+          }
+        >
+          {() =>
+            view === "table" ? (
+              <>
+                <LoadsTable rows={pageRows} />
+                <div className="border-t border-border p-3">
+                  <Pagination
+                    page={page}
+                    pageSize={PAGE_SIZE}
+                    total={filtered.length}
+                    onPageChange={setPage}
+                  />
+                </div>
+              </>
+            ) : (
+              <LoadsBoard rows={filtered} />
+            )
+          }
+        </QueryBoundary>
       </Card>
     </div>
   );
 }
 
-function LoadsTable({ rows }: { rows: FixtureLoad[] }) {
+function LoadsTable({ rows }: { rows: LoadRow[] }) {
   const navigate = useNavigate();
   return (
     <Table>
@@ -386,16 +419,16 @@ function LoadsTable({ rows }: { rows: FixtureLoad[] }) {
             </TableCell>
             <TableCell>
               <span className="text-sm">
-                {l.pickup.city}, {l.pickup.state}
+                {l.pickup ? `${l.pickup.city}, ${l.pickup.state}` : "—"}
                 <span className="mx-1.5 text-muted-foreground">→</span>
-                {l.delivery.city}, {l.delivery.state}
+                {l.delivery ? `${l.delivery.city}, ${l.delivery.state}` : "—"}
               </span>
               <div className="text-[11px] text-muted-foreground">
                 {l.commodity}
               </div>
             </TableCell>
             <TableCell className="text-sm">
-              {formatDateShort(l.pickup.windowStart)}
+              {l.pickup ? formatDateShort(l.pickup.windowStart) : "—"}
             </TableCell>
             <TableCell>
               {l.driver ? (
@@ -448,14 +481,9 @@ function DriverAvatar({ first, last }: { first: string; last: string }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Board view — Kanban-style columns grouped by status flow                  */
-/* -------------------------------------------------------------------------- */
-
-function LoadsBoard({ rows }: { rows: FixtureLoad[] }) {
-  // Bucket loads into their board column based on status.
+function LoadsBoard({ rows }: { rows: LoadRow[] }) {
   const buckets = useMemo(() => {
-    const map = new Map<string, FixtureLoad[]>();
+    const map = new Map<string, LoadRow[]>();
     for (const col of BOARD_COLUMNS) map.set(col.id, []);
     for (const l of rows) {
       const col = BOARD_COLUMNS.find((c) => c.statuses.includes(l.status));
@@ -464,18 +492,11 @@ function LoadsBoard({ rows }: { rows: FixtureLoad[] }) {
     return map;
   }, [rows]);
 
-  // Always show all 5 columns in Kanban flow order. When the viewport is
-  // narrow enough that columns would get cramped, the container scrolls
-  // horizontally — with the scrollbar visually hidden (trackpad / swipe /
-  // keyboard scroll all still work). Above lg the columns share the width
-  // equally and no scrolling occurs.
   return (
     <div className="scrollbar-none overflow-x-auto p-4 [scroll-padding-inline:1rem]">
       <div
         className={cn(
           "grid gap-3",
-          // At and above lg, columns share the available width equally.
-          // Below lg, each column takes 240px minimum which forces scroll.
           "grid-cols-[repeat(5,minmax(240px,1fr))]",
         )}
       >
@@ -511,11 +532,10 @@ function BoardColumn({
   items,
 }: {
   column: (typeof BOARD_COLUMNS)[number];
-  items: FixtureLoad[];
+  items: LoadRow[];
 }) {
   return (
     <div className="flex min-w-0 flex-col gap-2">
-      {/* Column header */}
       <div className="flex items-center justify-between px-1">
         <div className="flex min-w-0 items-center gap-2">
           <span
@@ -538,7 +558,6 @@ function BoardColumn({
         </span>
       </div>
 
-      {/* Column body — solid surface, clean border, generous padding */}
       <div
         className={cn(
           "flex min-h-[240px] flex-1 flex-col gap-2 p-2",
@@ -557,7 +576,7 @@ function BoardColumn({
   );
 }
 
-function BoardCard({ load: l, tone }: { load: FixtureLoad; tone: ColumnTone }) {
+function BoardCard({ load: l, tone }: { load: LoadRow; tone: ColumnTone }) {
   const driverLabel = l.driver
     ? `${l.driver.firstName[0]}. ${l.driver.lastName}`
     : null;
@@ -575,7 +594,6 @@ function BoardCard({ load: l, tone }: { load: FixtureLoad; tone: ColumnTone }) {
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
       )}
     >
-      {/* Left accent strip tying card to its column tone */}
       <span
         aria-hidden="true"
         className={cn(
@@ -585,7 +603,6 @@ function BoardCard({ load: l, tone }: { load: FixtureLoad; tone: ColumnTone }) {
         )}
       />
 
-      {/* Header: load # + rate */}
       <div className="flex items-start justify-between gap-2">
         <span className="truncate font-mono text-[13px] font-bold tracking-tight text-foreground">
           {l.loadNumber}
@@ -595,12 +612,10 @@ function BoardCard({ load: l, tone }: { load: FixtureLoad; tone: ColumnTone }) {
         </span>
       </div>
 
-      {/* Broker */}
       <div className="-mt-2 truncate text-[11px] text-muted-foreground">
         {l.broker.companyName}
       </div>
 
-      {/* Lane — origin → destination with vertical connector */}
       <div className="flex gap-2.5">
         <div aria-hidden="true" className="flex flex-col items-center py-1">
           <span className="size-1.5 rounded-full border border-[var(--border-strong)] bg-[var(--background)]" />
@@ -609,15 +624,14 @@ function BoardCard({ load: l, tone }: { load: FixtureLoad; tone: ColumnTone }) {
         </div>
         <div className="flex min-w-0 flex-1 flex-col justify-between gap-1 text-[11px] leading-tight">
           <span className="truncate font-medium text-foreground">
-            {l.pickup.city}, {l.pickup.state}
+            {l.pickup ? `${l.pickup.city}, ${l.pickup.state}` : "—"}
           </span>
           <span className="truncate text-muted-foreground">
-            {l.delivery.city}, {l.delivery.state}
+            {l.delivery ? `${l.delivery.city}, ${l.delivery.state}` : "—"}
           </span>
         </div>
       </div>
 
-      {/* Footer: driver + truck */}
       <div className="-mx-3 -mb-2.5 flex items-center justify-between gap-2 border-t border-[var(--border)] bg-[var(--surface)]/60 px-3 py-2">
         {driverLabel && l.driver ? (
           <div className="flex min-w-0 items-center gap-1.5">
