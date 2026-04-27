@@ -1,4 +1,6 @@
-import { createHmac, randomBytes, scrypt as scryptCb } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
+
+import bcrypt from "bcryptjs";
 
 import { createServerFn } from "@tanstack/react-start";
 import {
@@ -42,25 +44,10 @@ import {
  *   "${saltHex}:${keyHex}" with scrypt N=16384 r=16 p=1 dkLen=64.
  */
 
-function scrypt(
-  password: string,
-  salt: string,
-  keylen: number,
-  options: { N: number; r: number; p: number; maxmem: number },
-): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    scryptCb(password, salt, keylen, options, (err, key) => {
-      if (err) reject(err);
-      else resolve(key);
-    });
-  });
-}
-
-const SCRYPT_N = 16384;
-const SCRYPT_R = 16;
-const SCRYPT_P = 1;
-const SCRYPT_DKLEN = 64;
-const SCRYPT_MAXMEM = 128 * SCRYPT_N * SCRYPT_R * 2;
+// bcrypt cost 10 = ~50ms verify on a typical Vercel function. Scrypt with
+// Better Auth's defaults (N=16384, r=16) was the source of multi-second
+// hangs on Fluid Compute; bcrypt is the well-trodden serverless path.
+const BCRYPT_COST = 10;
 
 const SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 const COOKIE_PREFIX = "better-auth";
@@ -78,29 +65,14 @@ function readHeaders(): Headers {
 }
 
 async function hashPassword(password: string): Promise<string> {
-  const salt = randomBytes(16).toString("hex");
-  const key = await scrypt(password.normalize("NFKC"), salt, SCRYPT_DKLEN, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-    maxmem: SCRYPT_MAXMEM,
-  });
-  return `${salt}:${key.toString("hex")}`;
+  return bcrypt.hash(password.normalize("NFKC"), BCRYPT_COST);
 }
 
 async function verifyPassword(
   hash: string,
   password: string,
 ): Promise<boolean> {
-  const [salt, keyHex] = hash.split(":");
-  if (!salt || !keyHex) return false;
-  const target = await scrypt(password.normalize("NFKC"), salt, SCRYPT_DKLEN, {
-    N: SCRYPT_N,
-    r: SCRYPT_R,
-    p: SCRYPT_P,
-    maxmem: SCRYPT_MAXMEM,
-  });
-  return target.toString("hex") === keyHex;
+  return bcrypt.compare(password.normalize("NFKC"), hash);
 }
 
 // Match better-call's signed-cookie format exactly (its `getSignedCookie`

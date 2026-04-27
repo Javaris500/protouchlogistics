@@ -34,6 +34,7 @@
     "@tanstack/react-start": "^1.167.49",
     "@vercel/blob": "^2.3.3",
     "ai": "^6.0.168",
+    "bcryptjs": "^3.0.3",
     "better-auth": "^1.6.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

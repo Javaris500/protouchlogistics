@@ -4,20 +4,27 @@
  *
  * Run: `npm run seed:admin`
  *
- * Reads ADMIN_SEED_EMAIL + ADMIN_SEED_PASSWORD from .env.local. The brief
- * §3.4 spec — the password is rotated on first sign-in via the
- * `firstLoginCompletedAt` gate (per 05-TECH-CONTRACTS §4.2).
+ * Reads ADMIN_SEED_EMAIL + ADMIN_SEED_PASSWORD from .env.local. Per
+ * 05-TECH-CONTRACTS §4.2 the password is rotated on first sign-in via the
+ * `firstLoginCompletedAt` gate.
+ *
+ * Writes directly to users + accounts using bcrypt. We deliberately do NOT
+ * go through Better Auth's `auth.api.signUpEmail` here — that wrapper hangs
+ * on Vercel functions; src/server/auth/functions.ts now uses a direct
+ * bcrypt path and this seed has to match its hash format.
  */
 import { config } from "dotenv";
 config({ path: ".env.local" });
 config({ path: ".env" });
 
+import bcrypt from "bcryptjs";
 import { eq } from "drizzle-orm";
 
 import { db } from "@/server/db";
-import { users } from "@/server/db/schema";
-import { auth } from "@/server/auth";
+import { accounts, users } from "@/server/db/schema";
 import { env } from "@/server/env";
+
+const BCRYPT_COST = 10;
 
 async function main() {
   const existing = await db.query.users.findFirst({
@@ -25,30 +32,57 @@ async function main() {
   });
   if (existing) {
     console.log(
-      `Admin already exists: ${existing.email}; seed is a no-op.`,
+      `Admin already exists: ${existing.email}; rotating password hash to bcrypt format.`,
     );
+    const hash = await bcrypt.hash(
+      env.ADMIN_SEED_PASSWORD.normalize("NFKC"),
+      BCRYPT_COST,
+    );
+    const credAccount = await db.query.accounts.findFirst({
+      where: eq(accounts.userId, existing.id),
+    });
+    if (credAccount) {
+      await db
+        .update(accounts)
+        .set({ password: hash, providerId: "credential" })
+        .where(eq(accounts.id, credAccount.id));
+    } else {
+      await db.insert(accounts).values({
+        userId: existing.id,
+        providerId: "credential",
+        accountId: existing.id,
+        password: hash,
+      });
+    }
+    console.log(`  → updated accounts.password for ${existing.email}`);
     return;
   }
 
-  const created = await auth.api.signUpEmail({
-    body: {
-      email: env.ADMIN_SEED_EMAIL,
-      password: env.ADMIN_SEED_PASSWORD,
-      name: "Gary Tavel",
-    },
-  });
-  if (!created?.user) {
-    throw new Error("signUpEmail returned no user");
-  }
-
-  await db
-    .update(users)
-    .set({ role: "admin", status: "active", emailVerified: true })
-    .where(eq(users.id, created.user.id));
-
-  console.log(
-    `Seeded admin: ${env.ADMIN_SEED_EMAIL} (id=${created.user.id})`,
+  const hash = await bcrypt.hash(
+    env.ADMIN_SEED_PASSWORD.normalize("NFKC"),
+    BCRYPT_COST,
   );
+
+  const [created] = await db
+    .insert(users)
+    .values({
+      email: env.ADMIN_SEED_EMAIL,
+      name: "Gary Tavel",
+      role: "admin",
+      status: "active",
+      emailVerified: true,
+    })
+    .returning({ id: users.id });
+  if (!created) throw new Error("user insert returned no row");
+
+  await db.insert(accounts).values({
+    userId: created.id,
+    providerId: "credential",
+    accountId: created.id,
+    password: hash,
+  });
+
+  console.log(`Seeded admin: ${env.ADMIN_SEED_EMAIL} (id=${created.id})`);
 }
 
 main()
