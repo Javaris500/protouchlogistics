@@ -56,27 +56,36 @@ const SignInInput = z.object({
 export const signInFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => SignInInput.parse(data))
   .handler(async ({ data }): Promise<SessionUser> => {
-    // Pass headers so Better Auth has the request context (origin, cookies,
-    // Sec-Fetch-* for CSRF). Without them, signInEmail can hang/fail in
-    // production when trustedOrigins enforcement runs.
-    const response = await auth.api.signInEmail({
-      headers: readHeaders(),
-      body: { email: data.email, password: data.password },
-      asResponse: true,
-    });
+    const t0 = Date.now();
+    console.log("[signInFn] start", { email: data.email });
+    let response: Response;
+    try {
+      response = await auth.api.signInEmail({
+        headers: readHeaders(),
+        body: { email: data.email, password: data.password },
+        asResponse: true,
+      });
+      console.log("[signInFn] signInEmail returned", {
+        ms: Date.now() - t0,
+        status: response.status,
+      });
+    } catch (err) {
+      console.error("[signInFn] signInEmail threw", {
+        ms: Date.now() - t0,
+        err: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
 
     if (!response.ok) {
       throw new AuthError("UNAUTHORIZED", "Sign-in failed");
     }
     forwardSetCookies(response);
 
-    // Re-read the session through our wrapper so we get SessionUser shape
-    // (with driverId resolved). Use the request headers from the cookie we
-    // just wrote — the Set-Cookie hasn't been applied to the request yet,
-    // so we read from the JSON body Better Auth returned.
     const body = (await response.json().catch(() => null)) as
       | { user?: { id: string; email: string; role?: "admin" | "driver" } }
       | null;
+    console.log("[signInFn] done", { ms: Date.now() - t0, hasUser: !!body?.user });
     if (!body?.user) throw new AuthError("UNAUTHORIZED", "Sign-in failed");
     return {
       id: body.user.id,
