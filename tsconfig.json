@@ -25,7 +25,8 @@
     "allowJs": false,
     "noEmit": true,
     "types": [
-      "vite/client"
+      "vite/client",
+      "node"
     ],
     "baseUrl": ".",
     "paths": {
