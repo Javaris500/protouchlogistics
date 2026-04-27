@@ -12,7 +12,8 @@
     "typecheck:vite": "tsc --noEmit -p tsconfig.node.json",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "seed:admin": "tsx --env-file=.env.local seeds/admin.ts"
+    "seed:admin": "tsx --env-file=.env.local seeds/admin.ts",
+    "seed:demo": "tsx --env-file=.env.local seeds/demo.ts"
   },
   "engines": {
     "node": ">=20.0.0"
