@@ -1,6 +1,6 @@
 import * as React from "react";
-import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { Link, useRouterState } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { LogOut, PanelLeftClose, PanelLeftOpen, Truck } from "lucide-react";
 
 import { getSessionFn, signOutFn } from "@/server/auth/functions";
@@ -401,7 +401,7 @@ function DriveModeLink({ collapsed }: { collapsed: boolean }) {
 }
 
 function UserCard({ collapsed }: { collapsed: boolean }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: user } = useQuery({
     queryKey: ["session"],
     queryFn: () => getSessionFn(),
@@ -424,9 +424,16 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
   const roleLabel = user?.role ?? "";
 
   async function handleSignOut() {
-    await signOutFn();
-    await router.invalidate();
-    router.navigate({ to: "/login" });
+    try {
+      await signOutFn();
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Sign out failed", err);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["session"] });
+    // Hard navigation guarantees the next request reflects the cleared
+    // cookie. Soft router.navigate keeps stale router state cached.
+    window.location.href = "/login";
   }
 
   return (
