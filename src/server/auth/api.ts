@@ -36,14 +36,10 @@ async function toSessionUser(input: {
   email: string;
   role: Role;
 }): Promise<SessionUser> {
-  if (input.role !== "driver") {
-    return {
-      id: input.userId,
-      email: input.email,
-      role: input.role,
-      driverId: null,
-    };
-  }
+  // driverId resolves for ANY user with a driver_profile, regardless of role.
+  // This lets Gary (role='admin') also have a driver_profile and be assignable
+  // to loads. UI uses driverId presence — not role — to decide if /driver is
+  // accessible.
   const profile = await db.query.driverProfiles.findFirst({
     where: eq(driverProfiles.userId, input.userId),
     columns: { id: true },
@@ -109,7 +105,11 @@ export async function requireAdmin(headers: Headers): Promise<SessionUser> {
 export async function requireDriver(headers: Headers): Promise<SessionUser> {
   const user = await getSession(headers);
   if (!user) throw new AuthError("UNAUTHORIZED", "Not signed in");
-  if (user.role !== "driver") {
+  // Allow either: a user with role='driver', OR an admin who has gone
+  // through onboarding and has a driver_profile (Gary's dual-mode case).
+  // Driver-scoped server functions then scope queries by driverId — never
+  // by role — so the admin-as-driver path is data-safe.
+  if (user.role !== "driver" && !user.driverId) {
     throw new AuthError("FORBIDDEN", "Driver access required");
   }
   return user;

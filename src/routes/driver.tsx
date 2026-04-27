@@ -18,7 +18,10 @@ export const Route = createFileRoute("/driver")({
     if (!session) {
       throw redirect({ to: "/login" });
     }
-    if (session.role !== "driver") {
+    // Allow if role='driver' OR if user has a driver_profile (Gary's
+    // admin-as-driver case). No driver_profile + non-driver role = bounce
+    // back to admin dashboard.
+    if (!session.driverId && session.role !== "driver") {
       throw redirect({ to: "/admin/dashboard" });
     }
     return { session };

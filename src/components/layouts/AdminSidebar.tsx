@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { LogOut, PanelLeftClose, PanelLeftOpen, Truck } from "lucide-react";
 
 import { getSessionFn, signOutFn } from "@/server/auth/functions";
 
@@ -84,6 +84,7 @@ export function AdminSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="border-t border-[var(--sidebar-border-strong)]">
+        <DriveModeLink collapsed={collapsed} />
         <UserCard collapsed={collapsed} />
       </SidebarFooter>
       <SidebarRail />
@@ -358,6 +359,45 @@ function toneFg(tone: NavBadgeTone): string {
     default:
       return "text-[var(--sidebar-foreground)]";
   }
+}
+
+/**
+ * "I'm also a driver" toggle. Only renders for admins.
+ *
+ *   - admin without a driver_profile → "Set up driver mode" → /onboarding
+ *   - admin with a driver_profile    → "Switch to driver view" → /driver
+ *
+ * Plain drivers don't see this; they're already on the driver side.
+ */
+function DriveModeLink({ collapsed }: { collapsed: boolean }) {
+  const { data: user } = useQuery({
+    queryKey: ["session"],
+    queryFn: () => getSessionFn(),
+    staleTime: 30_000,
+  });
+
+  if (!user || user.role !== "admin") return null;
+
+  const hasProfile = Boolean(user.driverId);
+  const target = hasProfile ? "/driver" : "/onboarding";
+  const label = hasProfile ? "Switch to driver" : "Set up driver mode";
+
+  return (
+    <Link
+      to={target}
+      className={cn(
+        "flex items-center gap-2.5 rounded-[var(--radius-md)] p-2 mx-1",
+        "text-[13px] font-medium",
+        "text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-elevated)] hover:text-[var(--sidebar-foreground)]",
+        "transition-colors",
+        collapsed && "justify-center p-1",
+      )}
+      title={label}
+    >
+      <Truck className="h-4 w-4 shrink-0" />
+      {!collapsed && <span className="truncate">{label}</span>}
+    </Link>
+  );
 }
 
 function UserCard({ collapsed }: { collapsed: boolean }) {

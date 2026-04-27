@@ -3,7 +3,7 @@ import { getRequest } from "@tanstack/react-start/server";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 
-import { AuthError, requireDriver } from "@/server/auth/api";
+import { AuthError, getSession } from "@/server/auth/api";
 import { extractCdl, extractMedicalCard } from "@/server/ai";
 import { db } from "@/server/db";
 import {
@@ -77,8 +77,15 @@ const OnboardingDataSchema = z
 async function requireOnboardingUser() {
   const req = getRequest();
   if (!req) throw new AuthError("UNAUTHORIZED", "No request context");
-  const user = await requireDriver(req.headers);
-  return user;
+  // Onboarding accepts any signed-in user without a driver_profile. That
+  // covers two cases:
+  //   1. New driver who just signed up (role='driver', no profile yet)
+  //   2. Gary signing up to also drive (role='admin', no profile yet)
+  // Once a driver_profile exists, /onboarding redirects elsewhere — see
+  // the route-level gate.
+  const session = await getSession(req.headers);
+  if (!session) throw new AuthError("UNAUTHORIZED", "Not signed in");
+  return session;
 }
 
 /* ---------------------------------------------------------------- */
