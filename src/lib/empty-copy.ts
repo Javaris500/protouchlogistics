@@ -31,7 +31,11 @@ export type SurfaceKey =
   | "tracking.firstTime"
   | "notifications.firstTime"
   | "settings.audit.firstTime"
-  | "settings.integrations.none";
+  | "settings.integrations.none"
+  | "driver.todayLoad.none"
+  | "driver.pay.pending"
+  | "driver.documents.firstTime"
+  | "driver.loads.history.empty";
 
 export const EMPTY_COPY: Record<SurfaceKey, EmptyCopy> = {
   "dashboard.activeLoads": {
@@ -191,5 +195,25 @@ export const EMPTY_COPY: Record<SurfaceKey, EmptyCopy> = {
     description:
       "Connect Neon, R2, Resend, Mapbox, and the rest to unlock live data, email delivery, and maps. Pick an integration below to get started.",
     variant: "first-time",
+  },
+  "driver.todayLoad.none": {
+    title: "No loads assigned yet",
+    description: "Gary will dispatch you when one comes in.",
+    variant: "first-time",
+  },
+  "driver.pay.pending": {
+    title: "Pay pending",
+    description: "Gary sets your pay before pickup.",
+    variant: "first-time",
+  },
+  "driver.documents.firstTime": {
+    title: "Finish your DOT file",
+    description: "Upload your CDL and medical card to finish onboarding.",
+    variant: "first-time",
+  },
+  "driver.loads.history.empty": {
+    title: "No completed loads yet",
+    description: "Your delivered loads will show up here as you run them.",
+    variant: "caught-up",
   },
 };

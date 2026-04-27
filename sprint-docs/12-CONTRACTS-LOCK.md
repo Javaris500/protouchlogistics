@@ -1,10 +1,13 @@
 # Contracts Lock — Shared Interfaces
 
 **Owner:** Orchestrator (write); Sessions 1 / 2 / 3 (read)
-**Status:** §1–6 LOCKED 2026-04-26. §7 (empty copy) still drafts on demand.
+**Version:** v1.1 — `onboarding_drafts` table added 2026-04-26 (per Session 3 Request #2)
+**Status:** §1–6 LOCKED 2026-04-26 (v1) → §1 amended for `onboarding_drafts` (v1.1). §7 (empty copy) — driver keys 1–4 promoted to LOCKED 2026-04-26.
 **Lock policy:** Sections marked LOCKED cannot be changed without a version bump and notification to all active sessions.
 
 > **Locked by orchestrator on 2026-04-26.** §1–6 reflect what shipped in `feat/infra-auth` (commits `5cb365d` → `30b41d6`). The 5 deviations from the original spec are recorded in §9 — read those before assuming a field/route exists. Sessions 2 + 3 are unblocked as of this date.
+>
+> **v1.1 amendment 2026-04-26:** `onboarding_drafts` table added (migration `0001_curvy_bloodaxe.sql`, applied to Railway). Server-fn wiring (`getOnboardingDraftFn` / `patchOnboardingDraftFn` / `submitOnboardingProfileFn`) is owed by Session 3 follow-up — orchestrator will land it during Phase A integration.
 >
 > **Quick start for Sessions 2 + 3:** if you only have time to skim, jump to **§11 (Cookbook)** — it's four copy-paste snippets that cover ~80% of the patterns you'll need.
 
@@ -107,6 +110,7 @@ Other tables — full shapes in `src/server/db/schema/`:
 - `invoices`, `invoice_line_items`, `settlement_statements`, `pod_deliveries`, `display_tokens` — per `02-DATA-MODEL §8`
 - `notifications` — per `02-DATA-MODEL §9`
 - `audit_log` — per `02-DATA-MODEL §10`. Table only; feature-code writes are out of scope this sprint per `09-INFRA-AND-AUTH §1`.
+- `onboarding_drafts` (v1.1) — `(userId pk → users.id, data jsonb default '{}'::jsonb, updatedAt)`. Holds partial onboarding state pre-profile-creation. One-to-one with users (NOT driver_profiles, since the row exists *before* a profile does). Deleted by `submitOnboardingProfileFn` after profile + documents land.
 
 Required Postgres extensions (run before any table) — added at the top of `0000_init.sql`:
 

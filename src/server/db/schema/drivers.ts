@@ -1,7 +1,9 @@
+import { sql } from "drizzle-orm";
 import {
   AnyPgColumn,
   date,
   index,
+  jsonb,
   pgTable,
   text,
   timestamp,
@@ -91,3 +93,26 @@ export const driverProfiles = pgTable(
 
 export type DriverProfile = typeof driverProfiles.$inferSelect;
 export type NewDriverProfile = typeof driverProfiles.$inferInsert;
+
+/**
+ * Server-backed onboarding draft. Holds partial state while an invited user
+ * walks through `/onboarding/*` so they can resume on any device. Replaces
+ * the previous sessionStorage-only draft in `OnboardingProvider`.
+ *
+ * Lives one-to-one with `users` (not `driver_profiles`) because the row only
+ * exists *before* a profile does. On final submit, `submitOnboardingProfileFn`
+ * reads the draft, creates the `driver_profiles` row + any pending `documents`
+ * rows, then deletes the draft.
+ */
+export const onboardingDrafts = pgTable("onboarding_drafts", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  data: jsonb("data").notNull().default(sql`'{}'::jsonb`),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export type OnboardingDraft = typeof onboardingDrafts.$inferSelect;
+export type NewOnboardingDraft = typeof onboardingDrafts.$inferInsert;
