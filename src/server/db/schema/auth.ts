@@ -13,18 +13,22 @@ import { userRole, userStatus } from "./_enums";
 
 /**
  * Single identity table. Both Gary (admin) and drivers live here.
- * Better Auth manages `passwordHash` via its credential provider; everything
- * else (role, status, firstLoginCompletedAt, …) is owned by the application.
+ *
+ * Password material lives on `accounts.password` (Better Auth's credential
+ * ledger), not here — this table is identity + role + status only. `name` is
+ * required by Better Auth; we seed it from email on invite and refresh it
+ * once the driver completes the about-step (firstName + lastName).
  */
 export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     email: citext("email").notNull(),
-    passwordHash: text("password_hash"),
+    name: text("name").notNull(),
     role: userRole("role").notNull(),
     status: userStatus("status").notNull(),
     emailVerified: boolean("email_verified").notNull().default(false),
+    image: text("image"),
     twoFactorEnabled: boolean("two_factor_enabled").notNull().default(false),
     twoFactorSecret: text("two_factor_secret"),
     lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
@@ -86,7 +90,21 @@ export const accounts = pgTable("accounts", {
     .references(() => users.id, { onDelete: "cascade" }),
   providerId: text("provider_id").notNull(),
   accountId: text("account_id").notNull(),
+  // Email/password credential. Hash format owned by Better Auth.
   password: text("password"),
+  // OAuth fields — unused in Phase 1 but Better Auth touches them at write
+  // time for any provider it adds, so include them now to avoid a follow-up
+  // migration if/when SSO arrives.
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  accessTokenExpiresAt: timestamp("access_token_expires_at", {
+    withTimezone: true,
+  }),
+  refreshTokenExpiresAt: timestamp("refresh_token_expires_at", {
+    withTimezone: true,
+  }),
+  scope: text("scope"),
+  idToken: text("id_token"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
