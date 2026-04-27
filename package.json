@@ -18,6 +18,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
+    "@ai-sdk/gateway": "^3.0.104",
     "@radix-ui/react-dialog": "^1.1.2",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
     "@radix-ui/react-label": "^2.1.8",
@@ -30,6 +31,8 @@
     "@tanstack/react-query": "^5.59.0",
     "@tanstack/react-router": "^1.168.24",
     "@tanstack/react-start": "^1.167.49",
+    "@vercel/blob": "^2.3.3",
+    "ai": "^6.0.168",
     "better-auth": "^1.6.9",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
