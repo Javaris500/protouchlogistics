@@ -26,8 +26,19 @@ function LoginPage() {
     setError(null);
     setSubmitting(true);
 
+    // Hard timeout — if signInFn hasn't returned in 15s the user gets a
+    // real error instead of a stuck spinner. Common cause: Railway DB
+    // wake-up latency on first hit after idle.
+    const timeoutId = window.setTimeout(() => {
+      setError(
+        "Sign-in is taking longer than expected. Try again — if the database was idle, the next attempt should be fast.",
+      );
+      setSubmitting(false);
+    }, 15_000);
+
     try {
       const user = await signInFn({ data: { email, password } });
+      window.clearTimeout(timeoutId);
       const target =
         user.role === "admin"
           ? "/admin/dashboard"
@@ -36,6 +47,7 @@ function LoginPage() {
             : "/onboarding";
       window.location.href = target;
     } catch (err) {
+      window.clearTimeout(timeoutId);
       setError(
         err instanceof Error
           ? err.message
