@@ -85,5 +85,6 @@ export const notificationType = pgEnum("notification_type", [
   "invoice_sent",
   "invoice_paid",
   "invoice_overdue",
+  "pay_changed",
   "system",
 ]);

@@ -15,6 +15,13 @@
       "when": 1777253884049,
       "tag": "0001_curvy_bloodaxe",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1777254080998,
+      "tag": "0002_handy_the_fallen",
+      "breakpoints": true
     }
   ]
 }
