@@ -41,11 +41,15 @@ interface OnboardingCtx {
   data: OnboardingData;
   update: (patch: Partial<OnboardingData>) => void;
   reset: () => void;
+  /** Total AI helper calls used in this session — cost guardrail per contract §4. */
+  aiCallsCount: number;
+  recordAiCall: () => void;
 }
 
 const Context = React.createContext<OnboardingCtx | null>(null);
 
 const STORAGE_KEY = "ptl-onboarding-draft";
+const AI_CALL_WARN_THRESHOLD = 4;
 
 function loadDraft(): OnboardingData {
   if (typeof window === "undefined") return {};
@@ -72,6 +76,7 @@ export function OnboardingProvider({
   children: React.ReactNode;
 }) {
   const [data, setData] = React.useState<OnboardingData>(() => loadDraft());
+  const [aiCallsCount, setAiCallsCount] = React.useState(0);
 
   const update = React.useCallback((patch: Partial<OnboardingData>) => {
     setData((prev) => {
@@ -83,14 +88,28 @@ export function OnboardingProvider({
 
   const reset = React.useCallback(() => {
     setData({});
+    setAiCallsCount(0);
     if (typeof window !== "undefined") {
       window.sessionStorage.removeItem(STORAGE_KEY);
     }
   }, []);
 
+  const recordAiCall = React.useCallback(() => {
+    setAiCallsCount((n) => {
+      const next = n + 1;
+      if (next > AI_CALL_WARN_THRESHOLD) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[onboarding] AI helper call count = ${next} (>${AI_CALL_WARN_THRESHOLD}). Cost guardrail per contract §4.`,
+        );
+      }
+      return next;
+    });
+  }, []);
+
   const value = React.useMemo(
-    () => ({ data, update, reset }),
-    [data, update, reset],
+    () => ({ data, update, reset, aiCallsCount, recordAiCall }),
+    [data, update, reset, aiCallsCount, recordAiCall],
   );
 
   return <Context.Provider value={value}>{children}</Context.Provider>;

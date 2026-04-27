@@ -25,7 +25,7 @@ export const Route = createFileRoute("/onboarding/cdl")({
 
 function CdlStep() {
   const { sub } = Route.useSearch();
-  const { data, update } = useOnboarding();
+  const { data, update, recordAiCall } = useOnboarding();
   const navigate = useNavigate();
 
   // Preview URL kept locally — the provider only stores the photo key.
@@ -33,10 +33,31 @@ function CdlStep() {
     undefined,
   );
 
-  const handlePhotoConfirm = (key: string, preview: string) => {
+  const handlePhotoConfirm = (
+    key: string,
+    preview: string,
+    extracted: unknown,
+  ) => {
     setPreviewUrl(preview);
-    update({ cdlPhotoKey: key });
-    // Auto-advance to details sub-screen after successful upload.
+    const cdl = extracted as
+      | {
+          number: string;
+          class: "A" | "B" | "C";
+          state: string;
+          expiration: string;
+        }
+      | null;
+    update({
+      cdlPhotoKey: key,
+      ...(cdl
+        ? {
+            cdlNumber: cdl.number,
+            cdlClass: cdl.class,
+            cdlState: cdl.state,
+            cdlExpiration: cdl.expiration,
+          }
+        : {}),
+    });
     navigate({ to: "/onboarding/cdl", search: { sub: "details" } });
   };
 
@@ -67,9 +88,11 @@ function CdlStep() {
       >
         <PhotoCapture
           label="CDL"
+          docType="cdl"
           onConfirm={handlePhotoConfirm}
           existingKey={data.cdlPhotoKey}
           existingPreview={previewUrl}
+          onAiCall={recordAiCall}
         />
       </OnboardingShell>
     );

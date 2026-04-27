@@ -1,0 +1,359 @@
+import { useState } from "react";
+import { createFileRoute, notFound, useRouter } from "@tanstack/react-router";
+import {
+  ArrowRight,
+  CheckCircle2,
+  FileText,
+  MapPin,
+  Truck,
+  Upload,
+} from "lucide-react";
+
+import { BackLink } from "@/components/common/BackLink";
+import { PageHeader } from "@/components/common/PageHeader";
+import { Section } from "@/components/common/Section";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { StatusPill } from "@/components/ui/status-pill";
+import { toast } from "@/lib/toast";
+import {
+  formatDateTimeShort,
+  formatMoneyCents,
+  formatRelativeFromNow,
+} from "@/lib/format";
+import {
+  getDriverLoadFn,
+  updateDriverLoadStatusFn,
+  uploadDriverLoadDocFn,
+  type DriverLoadDetail,
+  type DriverLoadStatus,
+} from "@/server/functions/driver/loads";
+
+export const Route = createFileRoute("/driver/loads/$loadId")({
+  loader: async ({ params }) => {
+    const load = await getDriverLoadFn({ data: { loadId: params.loadId } });
+    if (!load) throw notFound();
+    return load;
+  },
+  component: DriverLoadDetailPage,
+});
+
+type Action = "accept" | "pickup" | "deliver";
+
+const ACCEPT_FROM: DriverLoadStatus[] = ["assigned"];
+const PICKUP_FROM: DriverLoadStatus[] = [
+  "accepted",
+  "en_route_pickup",
+  "at_pickup",
+];
+const DELIVER_FROM: DriverLoadStatus[] = [
+  "loaded",
+  "en_route_delivery",
+  "at_delivery",
+];
+
+function nextAction(status: DriverLoadStatus): {
+  action: Action;
+  label: string;
+} | null {
+  if (ACCEPT_FROM.includes(status)) return { action: "accept", label: "Accept load" };
+  if (PICKUP_FROM.includes(status)) return { action: "pickup", label: "Mark picked up" };
+  if (DELIVER_FROM.includes(status)) return { action: "deliver", label: "Mark delivered" };
+  return null;
+}
+
+function DriverLoadDetailPage() {
+  const load = Route.useLoaderData();
+  const router = useRouter();
+  const [busy, setBusy] = useState<Action | "bol" | "pod" | null>(null);
+
+  const action = nextAction(load.status);
+
+  async function transition(act: Action) {
+    if (busy) return;
+    setBusy(act);
+    try {
+      await updateDriverLoadStatusFn({ data: { loadId: load.id, action: act } });
+      await router.invalidate();
+      toast.success("Status updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Status update failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-6">
+      <BackLink to="/driver/loads">Back to loads</BackLink>
+
+      <PageHeader
+        eyebrow={`#${load.loadNumber}`}
+        title={load.brokerName}
+        description={`Updated ${formatRelativeFromNow(load.updatedAt)}`}
+        actions={<StatusPill kind="load" status={load.status} />}
+      />
+
+      <Section title="Summary">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <SummaryRow label="Commodity" value={load.commodity} />
+          <SummaryRow
+            label="Miles"
+            value={load.miles != null ? load.miles.toLocaleString() : "—"}
+          />
+          <SummaryRow
+            label="Driver pay"
+            value={
+              load.driverPayCents != null
+                ? formatMoneyCents(load.driverPayCents)
+                : "Pay pending — Gary sets before pickup"
+            }
+          />
+          <SummaryRow
+            label="Truck"
+            value={load.truckUnitNumber ?? "Not assigned"}
+            icon={Truck}
+          />
+          <SummaryRow
+            label="Reference"
+            value={load.referenceNumber ?? "—"}
+          />
+          <SummaryRow
+            label="BOL #"
+            value={load.bolNumber ?? "—"}
+          />
+        </div>
+        {load.specialInstructions && (
+          <p className="mt-4 rounded-md bg-muted/50 p-3 text-[13px] leading-relaxed text-[var(--foreground)]">
+            <span className="font-semibold">Special instructions: </span>
+            {load.specialInstructions}
+          </p>
+        )}
+      </Section>
+
+      {action && (
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="lg"
+            disabled={busy !== null}
+            onClick={() => transition(action.action)}
+          >
+            {busy === action.action ? "Updating…" : action.label}
+            <ArrowRight className="size-4" />
+          </Button>
+        </div>
+      )}
+
+      <Section title="Stops" description={`${load.stops.length} total`}>
+        <ol className="flex flex-col gap-3">
+          {load.stops.map((s) => (
+            <li key={s.id}>
+              <Card className="gap-0 p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--primary)]">
+                        {s.stopType === "pickup" ? "Pickup" : "Delivery"} ·{" "}
+                        {s.sequence}
+                      </span>
+                      {s.arrivedAt && (
+                        <CheckCircle2
+                          className="size-3.5 text-[var(--success)]"
+                          aria-hidden
+                        />
+                      )}
+                    </div>
+                    <p className="mt-1 truncate text-sm font-semibold">
+                      {s.companyName ?? "—"}
+                    </p>
+                    <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                      <MapPin className="size-3 shrink-0" aria-hidden />
+                      {s.addressLine1}, {s.city}, {s.state} {s.zip}
+                    </p>
+                    <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                      Window {formatDateTimeShort(s.windowStart)} →{" "}
+                      {formatDateTimeShort(s.windowEnd)}
+                    </p>
+                    {s.contactName && (
+                      <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                        Contact: {s.contactName}
+                        {s.contactPhone ? ` · ${s.contactPhone}` : ""}
+                      </p>
+                    )}
+                    {s.notes && (
+                      <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                        {s.notes}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </Card>
+            </li>
+          ))}
+        </ol>
+      </Section>
+
+      <Section
+        title="Paperwork"
+        description={`${load.documents.length} on file`}
+      >
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-2">
+            <UploadButton
+              label="Upload BOL"
+              loadId={load.id}
+              type="load_bol"
+              busy={busy === "bol"}
+              onBusy={setBusy}
+              onDone={() => router.invalidate()}
+            />
+            <UploadButton
+              label="Upload POD"
+              loadId={load.id}
+              type="load_pod"
+              busy={busy === "pod"}
+              onBusy={setBusy}
+              onDone={() => router.invalidate()}
+            />
+          </div>
+
+          {load.documents.length === 0 ? (
+            <p className="text-xs text-[var(--muted-foreground)]">
+              No documents uploaded yet.
+            </p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-[var(--border)] rounded-md border border-[var(--border)]">
+              {load.documents.map((d) => (
+                <li
+                  key={d.id}
+                  className="flex items-center gap-3 px-3 py-2.5 text-[13px]"
+                >
+                  <FileText
+                    className="size-4 shrink-0 text-[var(--muted-foreground)]"
+                    aria-hidden
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate font-medium">{d.fileName}</p>
+                    <p className="text-[11px] text-[var(--muted-foreground)]">
+                      {formatDocType(d.type)} ·{" "}
+                      {formatRelativeFromNow(d.createdAt)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function SummaryRow({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon?: typeof Truck;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-foreground)]">
+        {label}
+      </span>
+      <span className="flex items-center gap-1.5 text-sm">
+        {Icon && (
+          <Icon
+            className="size-3.5 text-[var(--muted-foreground)]"
+            aria-hidden
+          />
+        )}
+        <span className="text-[var(--foreground)]">{value}</span>
+      </span>
+    </div>
+  );
+}
+
+function UploadButton({
+  label,
+  loadId,
+  type,
+  busy,
+  onBusy,
+  onDone,
+}: {
+  label: string;
+  loadId: string;
+  type: "load_bol" | "load_pod";
+  busy: boolean;
+  onBusy: (k: "bol" | "pod" | null) => void;
+  onDone: () => void;
+}) {
+  const slot = type === "load_bol" ? "bol" : "pod";
+
+  async function handleFile(file: File) {
+    onBusy(slot);
+    try {
+      const buf = await file.arrayBuffer();
+      const contentBase64 = bufferToBase64(buf);
+      await uploadDriverLoadDocFn({
+        data: {
+          loadId,
+          type,
+          fileName: file.name,
+          mimeType: file.type || "application/octet-stream",
+          contentBase64,
+        },
+      });
+      toast.success(
+        `${type === "load_bol" ? "BOL" : "POD"} uploaded`,
+      );
+      onDone();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Upload failed");
+    } finally {
+      onBusy(null);
+    }
+  }
+
+  return (
+    <label
+      className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-4 text-[13px] font-medium transition-colors hover:bg-muted/40 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+      aria-disabled={busy}
+    >
+      <input
+        type="file"
+        accept="application/pdf,image/*"
+        className="hidden"
+        disabled={busy}
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            handleFile(file);
+            e.target.value = "";
+          }
+        }}
+      />
+      <Upload className="size-4" aria-hidden />
+      {busy ? "Uploading…" : label}
+    </label>
+  );
+}
+
+function bufferToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]!);
+  }
+  return btoa(binary);
+}
+
+function formatDocType(t: DriverLoadDetail["documents"][number]["type"]): string {
+  if (t === "load_bol") return "BOL";
+  if (t === "load_pod") return "POD";
+  return t;
+}

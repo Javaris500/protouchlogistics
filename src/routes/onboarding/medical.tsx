@@ -23,16 +23,24 @@ export const Route = createFileRoute("/onboarding/medical")({
 
 function MedicalStep() {
   const { sub } = Route.useSearch();
-  const { data, update } = useOnboarding();
+  const { data, update, recordAiCall } = useOnboarding();
   const navigate = useNavigate();
 
   const [previewUrl, setPreviewUrl] = React.useState<string | undefined>(
     undefined,
   );
 
-  const handlePhotoConfirm = (key: string, preview: string) => {
+  const handlePhotoConfirm = (
+    key: string,
+    preview: string,
+    extracted: unknown,
+  ) => {
     setPreviewUrl(preview);
-    update({ medicalPhotoKey: key });
+    const med = extracted as { expiration: string } | null;
+    update({
+      medicalPhotoKey: key,
+      ...(med ? { medicalExpiration: med.expiration } : {}),
+    });
     navigate({ to: "/onboarding/medical", search: { sub: "details" } });
   };
 
@@ -70,9 +78,11 @@ function MedicalStep() {
       >
         <PhotoCapture
           label="Medical card"
+          docType="medical"
           onConfirm={handlePhotoConfirm}
           existingKey={data.medicalPhotoKey}
           existingPreview={previewUrl}
+          onAiCall={recordAiCall}
         />
       </OnboardingShell>
     );
