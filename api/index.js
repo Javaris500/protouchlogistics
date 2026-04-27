@@ -1,21 +1,31 @@
 /**
- * Vercel Function entry point.
- *
- * TanStack Start v1.16x outputs a Web-Standard fetch handler at
- * `dist/server/server.js`. Vercel's Node runtime supports Request/Response
- * handler signatures natively, so we just delegate.
- *
- * vercel.json rewrites every non-static path to `/api`, so this function
- * serves all dynamic routes (admin pages, login, server functions, RPC).
- * Static assets in `dist/assets/`, `dist/client/`, and the prerendered
- * `dist/index.html` are served directly by Vercel without hitting this.
+ * Vercel Function entry — diagnostic mode.
+ * Replaced with the real TanStack Start delegate once we confirm the
+ * function infra works at all.
  */
-import server from "../dist/server/server.js";
-
 export const config = {
   runtime: "nodejs",
 };
 
 export default async function handler(request) {
-  return server.fetch(request);
+  return new Response(
+    JSON.stringify(
+      {
+        ok: true,
+        url: request.url,
+        method: request.method,
+        envCheck: {
+          hasDatabaseUrl: Boolean(process.env.DATABASE_URL),
+          hasAuthSecret: Boolean(process.env.BETTER_AUTH_SECRET),
+          nodeVersion: process.version,
+        },
+      },
+      null,
+      2,
+    ),
+    {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    },
+  );
 }
