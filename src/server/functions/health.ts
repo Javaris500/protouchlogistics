@@ -1,5 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { sql } from "drizzle-orm";
+import { z } from "zod";
 
 import { db } from "@/server/db";
 
@@ -11,6 +12,18 @@ import { db } from "@/server/db";
  *
  * Safe to leave in — no PII, no writes, no auth required.
  */
+/**
+ * No-op POST — used to test whether ANY POST server function hangs, or only
+ * the auth ones. Returns immediately with the body it received.
+ */
+export const echoPostFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) =>
+    z.object({ ping: z.string().min(1) }).parse(data),
+  )
+  .handler(async ({ data }) => {
+    return { pong: data.ping, at: Date.now() };
+  });
+
 export const dbHealthFn = createServerFn({ method: "GET" }).handler(
   async (): Promise<{
     ok: boolean;

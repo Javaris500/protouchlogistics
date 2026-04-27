@@ -1,6 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { dbHealthFn } from "@/server/functions/health";
+import { dbHealthFn, echoPostFn } from "@/server/functions/health";
+
+// Keep echoPostFn referenced so the build bundles it. Diagnostic only.
+void echoPostFn;
 
 /**
  * Diagnostic route. Runs `select now()` against the configured DB and
