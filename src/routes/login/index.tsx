@@ -62,6 +62,7 @@ function LoginPage() {
         }}
       >
         <h1 style={{ margin: 0, fontSize: "1.25rem" }}>Sign in</h1>
+        <p style={{ margin: 0, fontSize: "0.65rem", color: "#64748b" }}>build:DEPLOY-MARKER-A1B2</p>
 
         <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
           <span style={{ fontSize: "0.85rem" }}>Email</span>
