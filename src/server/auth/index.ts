@@ -83,12 +83,20 @@ export const auth = betterAuth({
     updateAge: 24 * 60 * 60,
     cookieCache: { enabled: true, maxAge: 5 * 60 },
   },
+  // Origin/CSRF allowlist. Without the production alias here, Better Auth
+  // rejects sign-in POSTs from https://<project>.vercel.app because VERCEL_URL
+  // is the per-deployment URL (e.g. <project>-abc123.vercel.app), not the alias
+  // the user actually visits. VERCEL_PROJECT_PRODUCTION_URL covers that gap.
   trustedOrigins: [
     env.BETTER_AUTH_URL,
+    process.env.VERCEL_PROJECT_PRODUCTION_URL
+      ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+      : null,
     process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
     process.env.VERCEL_BRANCH_URL
       ? `https://${process.env.VERCEL_BRANCH_URL}`
       : null,
+    process.env.NODE_ENV === "production" ? null : "http://localhost:3000",
   ].filter((url): url is string => Boolean(url)),
   advanced: {
     // Our schema uses uuid PKs with `defaultRandom()`. Setting generateId

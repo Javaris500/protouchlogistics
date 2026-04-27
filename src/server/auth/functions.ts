@@ -56,7 +56,11 @@ const SignInInput = z.object({
 export const signInFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => SignInInput.parse(data))
   .handler(async ({ data }): Promise<SessionUser> => {
+    // Pass headers so Better Auth has the request context (origin, cookies,
+    // Sec-Fetch-* for CSRF). Without them, signInEmail can hang/fail in
+    // production when trustedOrigins enforcement runs.
     const response = await auth.api.signInEmail({
+      headers: readHeaders(),
       body: { email: data.email, password: data.password },
       asResponse: true,
     });
@@ -128,6 +132,7 @@ export const signUpFn = createServerFn({ method: "POST" })
   .handler(async ({ data }): Promise<SessionUser> => {
     const fallbackName = data.email.split("@")[0] ?? data.email;
     const response = await auth.api.signUpEmail({
+      headers: readHeaders(),
       body: {
         email: data.email,
         password: data.password,
