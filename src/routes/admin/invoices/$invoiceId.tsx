@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
-import { CheckCircle2, Send } from "lucide-react";
+import { CheckCircle2, Download, Send } from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -16,6 +16,7 @@ import { errorMessage } from "@/lib/errors";
 import { formatMoneyCents } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import {
+  downloadInvoicePdf,
   getInvoice,
   markInvoicePaid,
   markInvoiceSent,
@@ -62,6 +63,40 @@ function InvoiceDetailPage() {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
+  const [downloading, setDownloading] = React.useState(false);
+
+  async function handleDownload(invoiceNumber: string) {
+    if (downloading) return;
+    setDownloading(true);
+    try {
+      const response = (await downloadInvoicePdf({
+        data: { invoiceId },
+      })) as unknown as Response;
+      if (!response || !(response instanceof Response) || !response.ok) {
+        throw new Error("Couldn't generate PDF");
+      }
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${invoiceNumber}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success("PDF downloaded");
+      // The download fn also persists to Vercel Blob — refresh the invoice
+      // so pdfUrl populates.
+      queryClient.invalidateQueries({
+        queryKey: ["admin", "invoice", invoiceId],
+      });
+    } catch (err) {
+      toast.error(errorMessage(err));
+    } finally {
+      setDownloading(false);
+    }
+  }
+
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/invoices">Back to invoices</BackLink>
@@ -91,6 +126,17 @@ function InvoiceDetailPage() {
                 description={detail.broker?.companyName ?? undefined}
                 actions={
                   <>
+                    <Button
+                      variant="outline"
+                      size="md"
+                      disabled={downloading}
+                      onClick={() =>
+                        handleDownload(detail.invoice.invoiceNumber)
+                      }
+                    >
+                      <Download className="size-4" />
+                      {downloading ? "Generating…" : "Download PDF"}
+                    </Button>
                     {canSend && (
                       <Button
                         variant="primary"
