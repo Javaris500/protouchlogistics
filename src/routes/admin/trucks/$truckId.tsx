@@ -322,9 +322,7 @@ function TruckDetailPage() {
                           <Button
                             variant="primary"
                             size="sm"
-                            onClick={() =>
-                              toast.info("Assign driver — coming soon")
-                            }
+                            onClick={() => setAssignDriverOpen(true)}
                           >
                             <UserPlus className="size-4" /> Assign driver
                           </Button>
