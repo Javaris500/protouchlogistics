@@ -1,8 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Filter } from "lucide-react";
-
-import { toast } from "@/lib/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { QueryBoundary } from "@/components/common/QueryBoundary";
@@ -24,18 +21,8 @@ function AuditPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Immutable record of every mutation. Filter by entity, user, or date
-          range.
+          Immutable record of every mutation across the app.
         </p>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled
-          onClick={() => toast.info("Filter panel — coming soon")}
-        >
-          <Filter className="size-4" />
-          Filters
-        </Button>
       </div>
 
       <QueryBoundary

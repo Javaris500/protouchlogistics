@@ -46,8 +46,20 @@ import { cn } from "@/lib/utils";
 import {
   deleteBroker,
   getBroker,
+  updateBroker,
   type BrokerGrade,
 } from "@/server/functions/brokers";
+import { FormDialog } from "@/components/common/FormDialog";
+import { FormField } from "@/components/common/FormField";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 const PAYMENT_TERMS_LABEL: Record<string, string> = {
   net_15: "Net 15",
@@ -80,6 +92,7 @@ function BrokerDetailPage() {
   const { brokerId } = Route.useParams();
   const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = React.useState(false);
+  const [editOpen, setEditOpen] = React.useState(false);
 
   const brokerQuery = useQuery({
     queryKey: ["admin", "broker", brokerId],
@@ -91,6 +104,18 @@ function BrokerDetailPage() {
     onSuccess: () => {
       toast.success("Broker archived");
       queryClient.invalidateQueries({ queryKey: ["admin", "brokers"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: (patch: Record<string, unknown>) =>
+      updateBroker({ data: { brokerId, patch: patch as never } }),
+    onSuccess: () => {
+      toast.success("Broker updated");
+      queryClient.invalidateQueries({ queryKey: ["admin", "broker", brokerId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "brokers"] });
+      setEditOpen(false);
     },
     onError: (err) => toast.error(errorMessage(err)),
   });
@@ -149,7 +174,7 @@ function BrokerDetailPage() {
                     <Button
                       variant="outline"
                       size="md"
-                      onClick={() => toast.info("Edit broker — coming soon")}
+                      onClick={() => setEditOpen(true)}
                     >
                       <Pencil className="size-4" /> Edit
                     </Button>
@@ -491,11 +516,160 @@ function BrokerDetailPage() {
                   setArchiveOpen(false);
                 }}
               />
+              <EditBrokerDialog
+                open={editOpen}
+                onOpenChange={setEditOpen}
+                broker={broker}
+                onSubmit={async (patch) => {
+                  await updateMutation.mutateAsync(patch);
+                }}
+                isSubmitting={updateMutation.isPending}
+              />
             </>
           );
         }}
       </QueryBoundary>
     </div>
+  );
+}
+
+interface EditBrokerDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  broker: {
+    contactName: string;
+    contactEmail: string;
+    contactPhone: string;
+    billingEmail: string | null;
+    paymentTerms: string;
+    notes: string | null;
+  };
+  onSubmit: (
+    patch: Partial<{
+      contactName: string;
+      contactEmail: string;
+      contactPhone: string;
+      billingEmail: string | null;
+      paymentTerms:
+        | "net_15"
+        | "net_30"
+        | "net_45"
+        | "net_60"
+        | "quick_pay"
+        | "other";
+      notes: string | null;
+    }>,
+  ) => Promise<void>;
+  isSubmitting: boolean;
+}
+
+function EditBrokerDialog({
+  open,
+  onOpenChange,
+  broker,
+  onSubmit,
+  isSubmitting,
+}: EditBrokerDialogProps) {
+  const [contactName, setContactName] = React.useState(broker.contactName);
+  const [contactEmail, setContactEmail] = React.useState(broker.contactEmail);
+  const [contactPhone, setContactPhone] = React.useState(broker.contactPhone);
+  const [billingEmail, setBillingEmail] = React.useState(broker.billingEmail ?? "");
+  const [paymentTerms, setPaymentTerms] = React.useState<string>(
+    broker.paymentTerms,
+  );
+  const [notes, setNotes] = React.useState(broker.notes ?? "");
+
+  // Reset state when dialog opens
+  React.useEffect(() => {
+    if (open) {
+      setContactName(broker.contactName);
+      setContactEmail(broker.contactEmail);
+      setContactPhone(broker.contactPhone);
+      setBillingEmail(broker.billingEmail ?? "");
+      setPaymentTerms(broker.paymentTerms);
+      setNotes(broker.notes ?? "");
+    }
+  }, [open, broker]);
+
+  return (
+    <FormDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Edit broker"
+      description="Update contact info, payment terms, or notes."
+      icon={<Pencil className="size-5" />}
+      isSubmitting={isSubmitting}
+      submitLabel={isSubmitting ? "Saving…" : "Save changes"}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        await onSubmit({
+          contactName: contactName.trim(),
+          contactEmail: contactEmail.trim(),
+          contactPhone: contactPhone.trim(),
+          billingEmail: billingEmail.trim() || null,
+          paymentTerms: paymentTerms as
+            | "net_15"
+            | "net_30"
+            | "net_45"
+            | "net_60"
+            | "quick_pay"
+            | "other",
+          notes: notes.trim() || null,
+        });
+      }}
+    >
+      <FormField label="Contact name" required>
+        <Input
+          value={contactName}
+          onChange={(e) => setContactName(e.target.value)}
+          required
+        />
+      </FormField>
+      <FormField label="Contact email" required>
+        <Input
+          type="email"
+          value={contactEmail}
+          onChange={(e) => setContactEmail(e.target.value)}
+          required
+        />
+      </FormField>
+      <FormField label="Contact phone" required>
+        <Input
+          value={contactPhone}
+          onChange={(e) => setContactPhone(e.target.value)}
+          required
+        />
+      </FormField>
+      <FormField label="Billing email (optional)">
+        <Input
+          type="email"
+          value={billingEmail}
+          onChange={(e) => setBillingEmail(e.target.value)}
+        />
+      </FormField>
+      <FormField label="Payment terms" required>
+        <Select value={paymentTerms} onValueChange={setPaymentTerms}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="net_15">Net 15</SelectItem>
+            <SelectItem value="net_30">Net 30</SelectItem>
+            <SelectItem value="net_45">Net 45</SelectItem>
+            <SelectItem value="net_60">Net 60</SelectItem>
+            <SelectItem value="quick_pay">Quick pay</SelectItem>
+            <SelectItem value="other">Other</SelectItem>
+          </SelectContent>
+        </Select>
+      </FormField>
+      <FormField label="Notes (optional)">
+        <Textarea
+          rows={3}
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+        />
+      </FormField>
+    </FormDialog>
   );
 }
 

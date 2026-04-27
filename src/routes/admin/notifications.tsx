@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import { Bell, CheckCheck, Filter } from "lucide-react";
+import { Bell, CheckCheck } from "lucide-react";
 
 import { toast } from "@/lib/toast";
 import { errorMessage } from "@/lib/errors";
@@ -58,13 +58,6 @@ function NotificationsPage() {
         description="Everything that needs your attention, in one place."
         actions={
           <>
-            <Button
-              variant="outline"
-              size="md"
-              onClick={() => toast.info("Filter panel — coming soon")}
-            >
-              <Filter className="size-4" /> Filter
-            </Button>
             <Button
               variant="outline"
               size="md"
