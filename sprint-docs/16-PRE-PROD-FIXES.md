@@ -15,7 +15,7 @@ Two tiers below. Tier 1 must be fixed before the first real driver touches the a
 | 2 | Onboarding draft hydration race | ✓ FIXED — `HydrationGate` in `routes/onboarding.tsx` |
 | 3 | Submit-twice not guarded | ✓ FIXED — server-side idempotency check in `submitOnboardingProfileFn` returns the existing `driverProfileId` instead of erroring |
 | 4 | base64 photo upload (33% inflation) | ✓ FIXED — multipart `FormData` everywhere; no JSON inflation. `uploadOnboardingPhotoFn` and `uploadDriverLoadDocFn` now take raw files |
-| 5 | No rate limit on AI endpoints | OPEN — Tier 2 |
+| 5 | No rate limit on AI endpoints | ✓ FIXED — `userRateLimit` middleware (`src/server/middleware/rate-limit.ts`) applied to `uploadOnboardingPhotoFn`. Per-user bucket: 20 calls/hour. Bounds spam at ~$0.20/hour/user; legit onboarding (2–4 calls typical) sails through. In-memory single-replica per contract §5; swap to Redis when scaling horizontally. |
 | 6 | No GPS verification on arrive_pickup/delivery | OPEN — Tier 2 (Phase 2 if no detention pay) |
 | 7 | Driver-scoped queries fetch full `loads` row | ✓ FIXED — both `loadSummariesFor` and `getDriverLoadFn` now use explicit column projection (id, loadNumber, status, commodity, miles, driverPayCents, specialInstructions, referenceNumber, bolNumber, updatedAt + safe joins). `loads.rate`, `loads.brokerId`, `loads.createdByUserId` never enter server memory on driver queries — physical safeguard per contract §6.1. |
 | 8 | Orphan blob accumulation | OPEN — Tier 2 |

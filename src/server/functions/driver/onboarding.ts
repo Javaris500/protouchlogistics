@@ -13,6 +13,7 @@ import {
   users,
 } from "@/server/db/schema";
 import { uploadDoc } from "@/server/storage";
+import { userRateLimit } from "@/server/middleware/rate-limit";
 import type { CdlExtraction, MedicalCardExtraction } from "@/server/ai";
 
 /**
@@ -142,6 +143,17 @@ export interface UploadOnboardingPhotoResult {
  * and `file` (the binary). No base64 round-trip.
  */
 export const uploadOnboardingPhotoFn = createServerFn({ method: "POST" })
+  // Pre-prod fix #5: paid AI calls are rate-limited per user. A normal
+  // onboarding burns 2–4 calls (CDL + medical, plus one or two retakes if
+  // OCR fails). 20/hour leaves comfortable headroom for the legit path
+  // and bounds malicious spam at ~$0.20/hour/user against Claude Haiku.
+  .middleware([
+    userRateLimit({
+      prefix: "onboarding-photo",
+      limit: 20,
+      windowMs: 60 * 60 * 1000,
+    }),
+  ])
   .inputValidator(parseUploadOnboardingPhotoForm)
   .handler(async ({ data }): Promise<UploadOnboardingPhotoResult> => {
     const sessionUser = await requireOnboardingUser();
