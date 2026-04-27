@@ -40,18 +40,27 @@ function formatDob(iso?: string): string {
 }
 
 function ReviewStep() {
-  const { data, reset } = useOnboarding();
+  const { data, reset, submit } = useOnboarding();
   const navigate = useNavigate();
   const [submitting, setSubmitting] = React.useState(false);
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
+    if (submitting) return;
     setSubmitting(true);
-    // Phase 1 stub: real submit hits a server function, flips
-    // users.status → pending_approval, and notifies Gary.
-    window.setTimeout(() => {
+    try {
+      await submit();
       reset();
-      navigate({ to: "/onboarding/pending" });
-    }, 800);
+      await navigate({ to: "/onboarding/pending" });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("[onboarding] submit failed", err);
+      alert(
+        err instanceof Error
+          ? err.message
+          : "Could not submit your profile. Please try again.",
+      );
+      setSubmitting(false);
+    }
   };
 
   const stateName = (code?: string) =>
