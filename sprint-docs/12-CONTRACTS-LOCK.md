@@ -1,10 +1,12 @@
 # Contracts Lock — Shared Interfaces
 
 **Owner:** Orchestrator (write); Sessions 1 / 2 / 3 (read)
-**Status:** Session 1 fill-in v1 — awaiting orchestrator promotion to LOCKED
-**Lock policy:** Each section is promoted to LOCKED by orchestrator after Session 1 implements + verifies. Sections marked LOCKED cannot be changed without a version bump and notification to all active sessions.
+**Status:** §1–6 LOCKED 2026-04-26. §7 (empty copy) still drafts on demand.
+**Lock policy:** Sections marked LOCKED cannot be changed without a version bump and notification to all active sessions.
 
-> **Session 1 note (2026-04-26):** §1–6 below reflect what actually shipped in `feat/infra-auth`. Where the spec drifted from `02-DATA-MODEL.md`, the section says so. Orchestrator: please review §9 (deviations) before promoting §1–6 to LOCKED.
+> **Locked by orchestrator on 2026-04-26.** §1–6 reflect what shipped in `feat/infra-auth` (commits `5cb365d` → `30b41d6`). The 5 deviations from the original spec are recorded in §9 — read those before assuming a field/route exists. Sessions 2 + 3 are unblocked as of this date.
+>
+> **Quick start for Sessions 2 + 3:** if you only have time to skim, jump to **§11 (Cookbook)** — it's four copy-paste snippets that cover ~80% of the patterns you'll need.
 
 ---
 
@@ -113,6 +115,19 @@ CREATE EXTENSION IF NOT EXISTS "citext";
 CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 ```
 
+### 1.x Service-layer invariants Session 2 must enforce
+
+The schema does not enforce these via constraints — they live in services. If you skip them, the DB will accept inconsistent rows.
+
+| Invariant | Where | Why |
+|---|---|---|
+| `loads.driverPayCents` MUST be non-null before `status='completed'` | `loadsService.updateStatus()` | Pay is per-load now. The completion gate is what makes "Gary forgets to set pay" a 422 instead of an unpaid driver |
+| `loads.driverPayUpdatedAt` updated whenever `driverPayCents` changes | `loadsService.setDriverPay()` | Audit trail without scanning `audit_log` |
+| When `loads.assignedDriverId` is set, the driver's `cdlExpiration` and `medicalCardExpiration` MUST be in the future | `loadsService.assignDriver()` | Compliance gate from `02-DATA-MODEL §2` — kept in code per the data model |
+| `documents` row's `(driverProfileId | truckId | loadId)` matches the `type` prefix (`driver_*` / `truck_*` / `load_*`) | `documentsService.create()` | The CHECK constraint enforces "exactly one is non-null" but not the type-to-owner match |
+| Driver-scoped queries select **only** driver-safe columns (no `rate`, no `broker`) | `loadsService.getLoadDriverView()` etc. | Per `05-TECH-CONTRACTS §6.1` — physical column selection beats runtime stripping |
+| Better Auth's `signUpEmail` requires `name`; populate it from email at invite, refresh it after the about-step | `auth.acceptInvite()` (already done) → driver onboarding `about` step (Session 3) | `users.name` is NOT NULL |
+
 ---
 
 ## 2. Auth contract (Session 1 §3.4)
@@ -219,6 +234,8 @@ Constants:
 
 **Caveat for §9:** `getSignedUrl` returns the canonical URL unchanged — Vercel Blob v2 has no public time-bound signing API. Browser viewing of private blobs requires a server-mediated download endpoint owned by Session 2/3. `ttlSeconds` is accepted but ignored; preserved on the signature so callers can opt in once the SDK adds it.
 
+**Action for Session 2:** build `src/server/functions/documents/download.ts` — a server function or route that calls `authorizeDocumentRead(auth, docId)` then streams the bytes through `@vercel/blob` `get()`. Until that endpoint exists, no document can be viewed in the browser, so prioritize it before any documents UI.
+
 ---
 
 ## 4. AI helper contract (Session 1 §3.6)
@@ -271,7 +288,7 @@ Session 1 ships `authRequired / adminOnly / driverOnly`. The other middlewares (
 |---|---|---|---|
 | `DATABASE_URL` | Railway | Session 1 (db client, drizzle-kit, seed) | ✓ in `.env.local` |
 | `BETTER_AUTH_SECRET` | Generated | Better Auth | ✓ in `.env.local` |
-| `BETTER_AUTH_URL` | Vercel preview URL | Better Auth (cookie domain, trustedOrigins) | ✗ — set after first deploy in 3.7 |
+| `BETTER_AUTH_URL` | Vercel preview URL | Better Auth (cookie domain, trustedOrigins) | ✗ — defaults to `http://localhost:3000` if unset, so dev works without it; set in Vercel after first deploy |
 | `BLOB_READ_WRITE_TOKEN` | Vercel Blob | Storage helper, AI helper (blob read) | ✓ in `.env.local` |
 | `AI_GATEWAY_API_KEY` | Vercel AI Gateway | AI helper | ✓ in `.env.local` |
 | `ADMIN_SEED_EMAIL` | Manual | seeds/admin.ts | ✓ in `.env.local` |
@@ -300,15 +317,17 @@ Driver-portal keys to append to `src/lib/empty-copy.ts` once Session 3 requests 
 
 | Section | Status | Locked at |
 |---|---|---|
-| 1. Schema | DRAFT — Session 1 fill v1 | — |
-| 2. Auth | DRAFT — Session 1 fill v1 | — |
-| 3. Storage | DRAFT — Session 1 fill v1 | — |
-| 4. AI helper | DRAFT — Session 1 fill v1 | — |
-| 5. Function naming | DRAFT — Session 1 fill v1 | — |
-| 6. Env vars | DRAFT — Session 1 fill v1 | — |
-| 7. Empty copy | DRAFT | — |
+| 1. Schema | **LOCKED** | 2026-04-26 |
+| 2. Auth | **LOCKED** | 2026-04-26 |
+| 3. Storage | **LOCKED** | 2026-04-26 |
+| 4. AI helper | **LOCKED** | 2026-04-26 |
+| 5. Function naming | **LOCKED** | 2026-04-26 |
+| 6. Env vars | **LOCKED** | 2026-04-26 |
+| 7. Empty copy | DRAFT — append on demand via orchestrator | — |
 
-Orchestrator promotes each section to **LOCKED** after reviewing §9 below + confirming Session 1's verification gate. Once §1–6 are LOCKED, Sessions 2 and 3 are unblocked.
+Sections 1–6 are LOCKED. Sessions 2 and 3 are unblocked as of 2026-04-26.
+
+Changes to a LOCKED section require a version bump in this header and a notification to all active sessions. If Session 2 or 3 hits a contract gap during implementation, **stop and ask the orchestrator** rather than reshape the contract from inside another session.
 
 ---
 
@@ -345,25 +364,146 @@ Vercel Blob v2 (2.3.3) has no public time-bound signing API. `getSignedUrl(blobK
 
 ---
 
-## 10. Hand-off note to orchestrator (Session 1, 2026-04-26)
+## 10. Session 1 verification record
 
-Sub-tasks 3.2 → 3.6 + 3.8 + 3.9 ship clean on `feat/infra-auth`:
+| Sub-task | Commit | Verification |
+|---|---|---|
+| 3.2 Vite → TanStack Start | `5cb365d` | typecheck + build clean; dev boots; 14 spot-checked routes resolve |
+| 3.3 Drizzle schema | `fc299dc` | 22 tables on Railway Postgres 18.3; citext + pg_trgm enabled; `documents_owner_exclusive` CHECK present |
+| 3.4 Better Auth + seed | `46134d1` | Gary seeded (uuid id, role=admin, status=active); `signInFn` / `acceptInviteFn` wired |
+| 3.5 Vercel Blob helper | `f9d98e4` | `uploadDoc / getSignedUrl / deleteBlob / blobExists` exposed; 25 MB cap; mime allowlist |
+| 3.6 AI Gateway client | `f9d98e4` | `extractCdl + extractMedicalCard` via `"anthropic/claude-haiku-4-5"`; 2-attempt cap |
+| 3.8 Doc sync | `30b41d6` | `payModel/payRate/PAY_MODEL_LABEL/formatPayRate` zero hits across 02/03/04/06-* |
+| 3.9 Contracts lock fill | `30b41d6` | §1–6 written from real signatures |
 
-| Sub-task | Verification |
-|---|---|
-| 3.2 Vite → TanStack Start | typecheck + build clean; dev boots; 14 spot-checked routes resolve |
-| 3.3 Drizzle schema | 22 tables on Railway Postgres 18.3; citext + pg_trgm enabled; documents_owner_exclusive CHECK present |
-| 3.4 Better Auth + seed | Gary seeded (uuid id, role=admin, status=active); signInFn / acceptInviteFn / etc wired |
-| 3.5 Vercel Blob helper | uploadDoc / getSignedUrl / deleteBlob / blobExists exposed; 25 MB cap; mime allowlist |
-| 3.6 AI Gateway client | extractCdl + extractMedicalCard via "anthropic/claude-haiku-4-5"; 2-attempt cap |
-| 3.8 Doc sync | grep -E 'payModel\|payRate\|PAY_MODEL_LABEL\|formatPayRate' clean across 02/03/04/06-* |
-| 3.9 Contracts lock | This document |
+**Sub-task 3.7 (Vercel deploy) deferred** until orchestrator confirms `vercel link` strategy + pushes env vars to the Vercel dashboard. Doesn't block Sessions 2 + 3.
 
-**Sub-task 3.7 (Vercel deploy) deferred.** The deploy needs `vercel link` (this worktree has no `.vercel/`) and a one-time push of env vars to the Vercel dashboard, then a first deploy to obtain `BETTER_AUTH_URL`. That's a human-loop step. Session 1 can finish 3.7 once the orchestrator confirms the deploy strategy.
+---
 
-**Suggested orchestrator review path:**
-1. Pull `origin/feat/infra-auth`, run `npm install && npm run typecheck && npm run build` — confirm clean.
-2. Skim §9 deviations above. If any are objectionable, push back before promoting.
-3. Run `npm run seed:admin` against your `.env.local` — confirm Gary appears in the `users` table.
-4. Promote §1–6 to LOCKED in §8 above. Date the row.
-5. Send the unblock signal to Sessions 2 and 3 per `ACTIVATION-PROMPTS.md` §"Orchestrator handoff protocol".
+## 11. Cookbook for Sessions 2 + 3
+
+Four ready-to-copy patterns. If you only read one section of this doc, read this one.
+
+### 11.1 An admin-only server function (the 80% case for Session 2)
+
+```ts
+// src/server/functions/loads/list.ts
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+import { adminOnly } from "@/server/auth/middleware";
+import * as loadsService from "@/server/services/loads.service";
+
+const ListLoadsInput = z.object({
+  status: z.enum(["draft", "assigned", "completed", /* ... */]).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  cursor: z.string().nullable().default(null),
+});
+
+export const listLoads = createServerFn({ method: "GET" })
+  .middleware([adminOnly])
+  .inputValidator((data: unknown) => ListLoadsInput.parse(data))
+  .handler(async ({ data, context }) => {
+    // context.user is SessionUser (role='admin' guaranteed by middleware)
+    return loadsService.listForAdmin({
+      status: data.status,
+      limit: data.limit,
+      cursor: data.cursor,
+    });
+  });
+```
+
+### 11.2 A driver-scoped server function (the 80% case for Session 3)
+
+```ts
+// src/server/functions/driver/loads/today.ts
+import { createServerFn } from "@tanstack/react-start";
+import { driverOnly } from "@/server/auth/middleware";
+import * as loadsService from "@/server/services/loads.service";
+
+export const todayLoad = createServerFn({ method: "GET" })
+  .middleware([driverOnly])
+  .handler(async ({ context }) => {
+    // context.user.driverId is non-null (driverOnly guarantees it).
+    // The service MUST filter to this driver — never trust the client to pass driverId.
+    return loadsService.getCurrentLoadForDriver(context.user.driverId!);
+  });
+```
+
+### 11.3 Reading the session inside a route's `beforeLoad` (admin-portal gate)
+
+```ts
+// src/routes/admin.tsx (root of the admin section)
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { getSessionFn } from "@/server/auth/functions";
+
+export const Route = createFileRoute("/admin")({
+  beforeLoad: async () => {
+    const user = await getSessionFn();
+    if (!user) throw redirect({ to: "/login" });
+    if (user.role !== "admin") throw redirect({ to: "/" });
+    return { user };
+  },
+  // ...
+});
+```
+
+For driver routes, swap `role !== "admin"` for `role !== "driver"` and redirect to `/onboarding` if `driverId` is null.
+
+### 11.4 Uploading + viewing a document end-to-end
+
+```ts
+// Upload (Session 2/3, in a server function)
+import { uploadDoc } from "@/server/storage";
+import { db } from "@/server/db";
+import { documents } from "@/server/db/schema";
+
+const { blobKey } = await uploadDoc({
+  ownerKind: "load",
+  ownerId: loadId,
+  type: "load_bol",
+  file: incomingFile,                  // File or Buffer
+  fileName: incomingFile.name,
+  mimeType: incomingFile.type,
+});
+
+await db.insert(documents).values({
+  type: "load_bol",
+  blobKey,
+  fileName: incomingFile.name,
+  fileSizeBytes: incomingFile.size,
+  mimeType: incomingFile.type,
+  uploadedByUserId: context.user.id,
+  loadId,
+});
+```
+
+Browser-side document viewing requires a server-mediated download endpoint (see §3 caveat). Build it before the documents UI:
+
+```ts
+// src/server/functions/documents/download.ts (Session 2 owns this)
+import { createServerFn } from "@tanstack/react-start";
+import { authRequired } from "@/server/auth/middleware";
+import { authorizeDocumentRead } from "@/server/authorize/documents";
+import { get } from "@vercel/blob";
+import { env } from "@/server/env";
+
+export const downloadDocument = createServerFn({ method: "GET" })
+  .middleware([authRequired])
+  .inputValidator(/* { docId: uuid } */)
+  .handler(async ({ data, context }) => {
+    const doc = await authorizeDocumentRead(context.user, data.docId);
+    const blob = await get(doc.blobKey, {
+      access: "private",
+      token: env.BLOB_READ_WRITE_TOKEN,
+    });
+    if (!blob || blob.statusCode !== 200) throw new Error("Not found");
+    // Return the stream + headers; let TanStack Start emit the Response.
+    return new Response(blob.stream, {
+      headers: {
+        "content-type": doc.mimeType,
+        "content-disposition": `inline; filename="${doc.fileName}"`,
+      },
+    });
+  });
+```
