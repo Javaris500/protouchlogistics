@@ -13,7 +13,7 @@
 import server from "../dist/server/server.js";
 
 export const config = {
-  runtime: "nodejs22.x",
+  runtime: "nodejs",
 };
 
 export default async function handler(request) {
