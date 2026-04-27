@@ -1,5 +1,5 @@
 import * as React from "react";
-import { createFileRoute, useRouter } from "@tanstack/react-router";
+import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
 
 import { signInFn } from "@/server/auth/functions";
 
@@ -100,6 +100,13 @@ function LoginPage() {
             {error}
           </p>
         )}
+
+        <p style={{ fontSize: "0.85rem", margin: "0.5rem 0 0", textAlign: "center" }}>
+          New driver?{" "}
+          <Link to="/signup" style={{ color: "#2563eb" }}>
+            Create an account
+          </Link>
+        </p>
       </form>
     </div>
   );

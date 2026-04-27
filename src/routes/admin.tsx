@@ -1,12 +1,23 @@
-import { Outlet, createFileRoute } from "@tanstack/react-router";
+import { Outlet, createFileRoute, redirect } from "@tanstack/react-router";
 import { AdminShell } from "@/components/layouts/AdminShell";
+import { getSessionFn } from "@/server/auth/functions";
 
 /**
- * Layout route for /admin/*. In Phase 1 this will gain a server-side
- * `beforeLoad` guard that enforces role=admin + status=active.
- * For now: pure layout wrapper so the shell is testable without auth.
+ * Layout route for /admin/*. Auth gate:
+ *   - no session → redirect to /login
+ *   - role !== 'admin' → redirect to /driver
  */
 export const Route = createFileRoute("/admin")({
+  beforeLoad: async () => {
+    const session = await getSessionFn();
+    if (!session) {
+      throw redirect({ to: "/login" });
+    }
+    if (session.role !== "admin") {
+      throw redirect({ to: "/driver" });
+    }
+    return { session };
+  },
   component: AdminLayout,
 });
 

@@ -110,3 +110,50 @@ export const acceptInviteFn = createServerFn({ method: "POST" })
   .handler(async ({ data }) => {
     return acceptInvite(data.token, data.password, readHeaders());
   });
+
+const SignUpInput = z.object({
+  email: z.string().email(),
+  password: z.string().min(12),
+  name: z.string().min(1).max(120).optional(),
+});
+
+/**
+ * Public driver self-signup. Creates a `users` row with role='driver' and
+ * status='pending_approval' (defaults from auth/index.ts). The new user
+ * walks through /onboarding/* and lands on /onboarding/pending where Gary
+ * approves them via /admin/drivers/pending.
+ */
+export const signUpFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => SignUpInput.parse(data))
+  .handler(async ({ data }): Promise<SessionUser> => {
+    const fallbackName = data.email.split("@")[0] ?? data.email;
+    const response = await auth.api.signUpEmail({
+      body: {
+        email: data.email,
+        password: data.password,
+        name: data.name?.trim() || fallbackName,
+      },
+      asResponse: true,
+    });
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const message =
+        (body && typeof body === "object" && "message" in body
+          ? String((body as { message: unknown }).message)
+          : null) ?? "Sign-up failed";
+      throw new AuthError("UNAUTHORIZED", message);
+    }
+    forwardSetCookies(response);
+
+    const body = (await response.json().catch(() => null)) as
+      | { user?: { id: string; email: string; role?: "admin" | "driver" } }
+      | null;
+    if (!body?.user) throw new AuthError("UNAUTHORIZED", "Sign-up failed");
+    return {
+      id: body.user.id,
+      email: body.user.email,
+      role: body.user.role ?? "driver",
+      driverId: null,
+    };
+  });
