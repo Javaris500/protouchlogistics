@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
+import { getSessionFn } from "@/server/auth/functions";
 import {
   Activity,
   ArrowRight,
@@ -60,12 +61,25 @@ function DashboardPage() {
     day: "numeric",
   });
 
+  const { data: user } = useQuery({
+    queryKey: ["session"],
+    queryFn: () => getSessionFn(),
+    staleTime: 30_000,
+  });
+
+  // Greet the actual signed-in admin by their email's local-part. If the
+  // session hasn't loaded yet, fall back to a name-less greeting.
+  const firstName = user?.email?.split("@")[0]?.split(/[._-]/)[0];
+  const niceName = firstName
+    ? firstName.charAt(0).toUpperCase() + firstName.slice(1)
+    : null;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="animate-enter stagger-1">
         <PageHeader
           eyebrow={today}
-          title={`${greeting()}, Gary.`}
+          title={niceName ? `${greeting()}, ${niceName}.` : `${greeting()}.`}
           description="Here's what's moving today — active loads, drivers on the road, outstanding AR, and what needs your eyes next."
           actions={
             <Button asChild variant="primary" size="md">
