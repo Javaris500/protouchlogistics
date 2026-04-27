@@ -9,7 +9,6 @@ export default defineConfig({
   },
   plugins: [
     tanstackStart({
-      target: "vercel",
       tsr: {
         routesDirectory: "./src/routes",
         generatedRouteTree: "./src/routeTree.gen.ts",
