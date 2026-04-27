@@ -8,7 +8,6 @@ import {
 } from "@/components/onboarding/OnboardingField";
 import { useOnboarding } from "@/components/onboarding/OnboardingProvider";
 import { formatUsPhone, isValidUsPhone } from "@/lib/onboarding/phone";
-import { FAKE_ABOUT } from "@/lib/onboarding/fake-data";
 
 export const Route = createFileRoute("/onboarding/about")({
   component: AboutStep,
@@ -76,13 +75,6 @@ function AboutStep() {
     navigate({ to: "/onboarding/contact" });
   };
 
-  const handleSkip = () => {
-    update(FAKE_ABOUT);
-    // eslint-disable-next-line no-console
-    console.info("[DEV] skipped step: about");
-    navigate({ to: "/onboarding/contact" });
-  };
-
   const isValid =
     firstName.trim() !== "" &&
     lastName.trim() !== "" &&
@@ -100,7 +92,6 @@ function AboutStep() {
         <OnboardingFooter
           onNext={handleNext}
           nextDisabled={!isValid}
-          onSkip={handleSkip}
           helperText="Your info is saved automatically as you go."
         />
       }

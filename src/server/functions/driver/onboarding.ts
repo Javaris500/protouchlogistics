@@ -254,6 +254,19 @@ export const submitOnboardingProfileFn = createServerFn({
 }).handler(async (): Promise<SubmitOnboardingProfileResult> => {
   const sessionUser = await requireOnboardingUser();
 
+  // Idempotency guard. A double-tap on the review-page submit (or a network
+  // retry) would otherwise hit the `driver_profiles_user_id_key` unique
+  // constraint and surface a raw Postgres error. If the user already has a
+  // profile, return it — the second click is a no-op from the user's POV.
+  // Pre-prod fix #3 from sprint-docs/16-PRE-PROD-FIXES.md.
+  const existingProfile = await db.query.driverProfiles.findFirst({
+    where: eq(driverProfiles.userId, sessionUser.id),
+    columns: { id: true },
+  });
+  if (existingProfile) {
+    return { driverProfileId: existingProfile.id };
+  }
+
   const draftRow = await db.query.onboardingDrafts.findFirst({
     where: eq(onboardingDrafts.userId, sessionUser.id),
   });

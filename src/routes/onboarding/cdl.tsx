@@ -11,7 +11,6 @@ import {
 import { PhotoCapture } from "@/components/onboarding/PhotoCapture";
 import { useOnboarding } from "@/components/onboarding/OnboardingProvider";
 import { US_STATES } from "@/lib/onboarding/us-states";
-import { FAKE_CDL } from "@/lib/onboarding/fake-data";
 
 type Sub = "photo" | "details";
 
@@ -82,12 +81,6 @@ function CdlStep() {
             nextLabel={data.cdlPhotoKey ? "Continue" : "Skip photo"}
             nextDisabled={false}
             onBack={() => navigate({ to: "/onboarding/contact" })}
-            onSkip={() => {
-              update(FAKE_CDL);
-              // eslint-disable-next-line no-console
-              console.info("[DEV] skipped step: cdl (photo)");
-              navigate({ to: "/onboarding/cdl", search: { sub: "details" } });
-            }}
             helperText="We'll use this to pre-fill the next screen."
           />
         }
@@ -161,13 +154,6 @@ function CdlDetails() {
     navigate({ to: "/onboarding/medical", search: { sub: "photo" } });
   };
 
-  const handleSkip = () => {
-    update(FAKE_CDL);
-    // eslint-disable-next-line no-console
-    console.info("[DEV] skipped step: cdl (details)");
-    navigate({ to: "/onboarding/medical", search: { sub: "photo" } });
-  };
-
   return (
     <OnboardingShell
       currentStep="cdl"
@@ -185,7 +171,6 @@ function CdlDetails() {
           onBack={() =>
             navigate({ to: "/onboarding/cdl", search: { sub: "photo" } })
           }
-          onSkip={handleSkip}
         />
       }
     >

@@ -10,7 +10,6 @@ import {
 import { useOnboarding } from "@/components/onboarding/OnboardingProvider";
 import { US_STATES } from "@/lib/onboarding/us-states";
 import { formatUsPhone, isValidUsPhone } from "@/lib/onboarding/phone";
-import { FAKE_CONTACT } from "@/lib/onboarding/fake-data";
 
 export const Route = createFileRoute("/onboarding/contact")({
   component: ContactStep,
@@ -84,13 +83,6 @@ function ContactStep() {
     navigate({ to: "/onboarding/cdl", search: { sub: "photo" } });
   };
 
-  const handleSkip = () => {
-    update(FAKE_CONTACT);
-    // eslint-disable-next-line no-console
-    console.info("[DEV] skipped step: contact");
-    navigate({ to: "/onboarding/cdl", search: { sub: "photo" } });
-  };
-
   return (
     <OnboardingShell
       currentStep="contact"
@@ -102,7 +94,6 @@ function ContactStep() {
           onNext={handleNext}
           nextDisabled={!isValid}
           onBack={() => navigate({ to: "/onboarding/about" })}
-          onSkip={handleSkip}
         />
       }
     >

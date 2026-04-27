@@ -32,7 +32,6 @@ const CHECKLIST = [
 
 function WelcomeScreen() {
   const navigate = useNavigate();
-  const isDev = import.meta.env.DEV;
 
   return (
     <div className="relative flex min-h-dvh flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)]">
@@ -131,17 +130,6 @@ function WelcomeScreen() {
             </p>
           </div>
 
-          {isDev && (
-            <div className="flex justify-center pt-2">
-              <button
-                type="button"
-                onClick={() => navigate({ to: "/onboarding/about" })}
-                className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--subtle-foreground)] transition-colors hover:text-[var(--foreground)]"
-              >
-                Skip welcome (dev)
-              </button>
-            </div>
-          )}
         </div>
       </main>
     </div>

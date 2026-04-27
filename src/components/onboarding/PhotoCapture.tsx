@@ -70,13 +70,24 @@ function formatBytes(bytes: number): string {
 }
 
 async function fileToBase64(file: File): Promise<string> {
-  const buf = await file.arrayBuffer();
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  return btoa(binary);
+  // FileReader.readAsDataURL is implemented in the browser's native code, so a
+  // 5–25 MB camera image converts in milliseconds. The previous implementation
+  // looped byte-by-byte building a string, which was O(n²) on large files and
+  // could hang the tab on real CDL photos.
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        reject(new Error("Unexpected reader result"));
+        return;
+      }
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : result);
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Read failed"));
+    reader.readAsDataURL(file);
+  });
 }
 
 /**

@@ -7,7 +7,6 @@ interface Props {
   nextDisabled?: boolean;
   loading?: boolean;
   onBack?: () => void;
-  onSkip?: () => void;
   helperText?: string;
 }
 
@@ -22,11 +21,8 @@ export function OnboardingFooter({
   nextDisabled,
   loading,
   onBack,
-  onSkip,
   helperText,
 }: Props) {
-  const isDev = import.meta.env.DEV;
-
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-3">
@@ -62,24 +58,11 @@ export function OnboardingFooter({
         </Button>
       </div>
 
-      <div className="flex items-center justify-between gap-4">
-        {helperText ? (
-          <p className="text-[12px] leading-snug text-[var(--muted-foreground)]">
-            {helperText}
-          </p>
-        ) : (
-          <span />
-        )}
-        {isDev && onSkip && (
-          <button
-            type="button"
-            onClick={onSkip}
-            className="shrink-0 text-[11px] font-medium uppercase tracking-wider text-[var(--subtle-foreground)] transition-colors hover:text-[var(--foreground)]"
-          >
-            Skip (dev)
-          </button>
-        )}
-      </div>
+      {helperText && (
+        <p className="text-[12px] leading-snug text-[var(--muted-foreground)]">
+          {helperText}
+        </p>
+      )}
     </div>
   );
 }

@@ -8,7 +8,6 @@ import {
 } from "@/components/onboarding/OnboardingField";
 import { PhotoCapture } from "@/components/onboarding/PhotoCapture";
 import { useOnboarding } from "@/components/onboarding/OnboardingProvider";
-import { FAKE_MEDICAL } from "@/lib/onboarding/fake-data";
 import { AlertTriangle } from "lucide-react";
 
 type Sub = "photo" | "details";
@@ -69,15 +68,6 @@ function MedicalStep() {
             onBack={() =>
               navigate({ to: "/onboarding/cdl", search: { sub: "details" } })
             }
-            onSkip={() => {
-              update(FAKE_MEDICAL);
-              // eslint-disable-next-line no-console
-              console.info("[DEV] skipped step: medical (photo)");
-              navigate({
-                to: "/onboarding/medical",
-                search: { sub: "details" },
-              });
-            }}
             helperText="We'll pre-fill the expiration from your photo."
           />
         }
@@ -123,13 +113,6 @@ function MedicalDetails() {
     navigate({ to: "/onboarding/review" });
   };
 
-  const handleSkip = () => {
-    update(FAKE_MEDICAL);
-    // eslint-disable-next-line no-console
-    console.info("[DEV] skipped step: medical (details)");
-    navigate({ to: "/onboarding/review" });
-  };
-
   return (
     <OnboardingShell
       currentStep="medical"
@@ -147,7 +130,6 @@ function MedicalDetails() {
           onBack={() =>
             navigate({ to: "/onboarding/medical", search: { sub: "photo" } })
           }
-          onSkip={handleSkip}
         />
       }
     >
