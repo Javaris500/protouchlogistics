@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
@@ -12,8 +13,9 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { TableSkeleton } from "@/components/common/Skeleton";
 import { ViewSwitcher } from "@/components/common/ViewSwitcher";
 import { FilterChips } from "@/components/data/FilterChips";
 import { Pagination } from "@/components/data/Pagination";
@@ -31,13 +33,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EMPTY_COPY } from "@/lib/empty-copy";
+import { daysUntil, formatPhone } from "@/lib/format";
 import {
-  FIXTURE_DRIVERS,
-  driverNextExpiration,
-  formatPhone,
-  type FixtureDriver,
-} from "@/lib/fixtures/drivers";
+  inviteDriver,
+  listDrivers,
+  type DriverListItem,
+} from "@/server/functions/drivers";
+import { errorMessage } from "@/lib/errors";
+import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/admin/drivers/")({
@@ -49,9 +52,27 @@ type ViewMode = "table" | "grid";
 
 const PAGE_SIZE = 10;
 
-function isExpiring(d: FixtureDriver): boolean {
-  const e = driverNextExpiration(d);
-  return e.days <= 30;
+function nextExpiration(d: DriverListItem): {
+  days: number | null;
+  label: "CDL" | "Medical";
+  date: string | null;
+} {
+  const cdlDays = d.cdlExpiration ? daysUntil(d.cdlExpiration) : null;
+  const medDays = d.medicalCardExpiration
+    ? daysUntil(d.medicalCardExpiration)
+    : null;
+  if (cdlDays == null && medDays == null) {
+    return { days: null, label: "CDL", date: null };
+  }
+  if (cdlDays != null && (medDays == null || cdlDays <= medDays)) {
+    return { days: cdlDays, label: "CDL", date: d.cdlExpiration };
+  }
+  return { days: medDays!, label: "Medical", date: d.medicalCardExpiration };
+}
+
+function isExpiring(d: DriverListItem): boolean {
+  const e = nextExpiration(d);
+  return e.days != null && e.days <= 30;
 }
 
 function DriversListPage() {
@@ -61,48 +82,53 @@ function DriversListPage() {
   const [view, setView] = useState<ViewMode>("table");
   const [inviteOpen, setInviteOpen] = useState(false);
 
+  const queryClient = useQueryClient();
+
+  const inviteMutation = useMutation({
+    mutationFn: (email: string) => inviteDriver({ data: { email } }),
+    onSuccess: (result) => {
+      toast.success(
+        `Invite sent. URL (until email goes live): ${result.inviteUrl}`,
+      );
+      queryClient.invalidateQueries({ queryKey: ["admin", "drivers"] });
+    },
+    onError: (err) => {
+      toast.error(errorMessage(err));
+    },
+  });
+
+  const driversQuery = useQuery({
+    queryKey: ["admin", "drivers", { filter, search }],
+    queryFn: () =>
+      listDrivers({
+        data: {
+          status:
+            filter === "all" || filter === "expiring" ? undefined : filter,
+          expiringWithinDays: filter === "expiring" ? 30 : undefined,
+          search: search.trim() || undefined,
+          limit: 200,
+          cursor: null,
+        },
+      }),
+  });
+
+  const allRows = driversQuery.data?.drivers ?? [];
+
   const counts = useMemo(
     () => ({
-      all: FIXTURE_DRIVERS.length,
-      active: FIXTURE_DRIVERS.filter((d) => d.status === "active").length,
-      pending_approval: FIXTURE_DRIVERS.filter(
-        (d) => d.status === "pending_approval",
-      ).length,
-      invited: FIXTURE_DRIVERS.filter((d) => d.status === "invited").length,
-      suspended: FIXTURE_DRIVERS.filter((d) => d.status === "suspended").length,
-      expiring: FIXTURE_DRIVERS.filter(isExpiring).length,
+      all: allRows.length,
+      active: allRows.filter((d) => d.status === "active").length,
+      pending_approval: allRows.filter((d) => d.status === "pending_approval")
+        .length,
+      invited: allRows.filter((d) => d.status === "invited").length,
+      suspended: allRows.filter((d) => d.status === "suspended").length,
+      expiring: allRows.filter(isExpiring).length,
     }),
-    [],
+    [allRows],
   );
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return FIXTURE_DRIVERS.filter((d) => {
-      if (filter === "expiring") {
-        if (!isExpiring(d)) return false;
-      } else if (filter !== "all" && d.status !== filter) {
-        return false;
-      }
-      if (q) {
-        const haystack = [
-          d.firstName,
-          d.lastName,
-          d.email,
-          d.phone,
-          d.city,
-          d.state,
-          d.cdlNumber,
-          d.assignedTruck?.unitNumber ?? "",
-        ]
-          .join(" ")
-          .toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [filter, search]);
-
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Server already applies filter+search; client paginates the page.
+  const pageRows = allRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-5">
@@ -175,56 +201,64 @@ function DriversListPage() {
           </div>
         </div>
 
-        {pageRows.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              icon={UserPlus}
-              variant={EMPTY_COPY["drivers.filter"].variant}
-              title={EMPTY_COPY["drivers.filter"].title}
-              description={EMPTY_COPY["drivers.filter"].description}
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setFilter("all");
-                    setSearch("");
-                    setPage(1);
-                  }}
-                >
-                  {EMPTY_COPY["drivers.filter"].ctaLabel}
-                </Button>
-              }
-            />
-          </div>
-        ) : view === "table" ? (
-          <>
-            <DriversTable rows={pageRows} />
-            <div className="border-t border-border p-3">
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filtered.length}
-                onPageChange={setPage}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <DriversGrid rows={pageRows} />
-            <div className="border-t border-border p-3">
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filtered.length}
-                onPageChange={setPage}
-              />
-            </div>
-          </>
-        )}
+        <div className="p-0">
+          <QueryBoundary
+            query={driversQuery}
+            emptyKey="drivers.filter"
+            isEmpty={() => pageRows.length === 0}
+            skeleton={<TableSkeleton rows={PAGE_SIZE} cols={7} className="m-3" />}
+            emptyAction={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFilter("all");
+                  setSearch("");
+                  setPage(1);
+                }}
+              >
+                Clear filters
+              </Button>
+            }
+          >
+            {() =>
+              view === "table" ? (
+                <>
+                  <DriversTable rows={pageRows} />
+                  <div className="border-t border-border p-3">
+                    <Pagination
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      total={allRows.length}
+                      onPageChange={setPage}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <DriversGrid rows={pageRows} />
+                  <div className="border-t border-border p-3">
+                    <Pagination
+                      page={page}
+                      pageSize={PAGE_SIZE}
+                      total={allRows.length}
+                      onPageChange={setPage}
+                    />
+                  </div>
+                </>
+              )
+            }
+          </QueryBoundary>
+        </div>
       </Card>
 
-      <InviteDriverDialog open={inviteOpen} onOpenChange={setInviteOpen} />
+      <InviteDriverDialog
+        open={inviteOpen}
+        onOpenChange={setInviteOpen}
+        onSubmit={async ({ email }) => {
+          await inviteMutation.mutateAsync(email);
+        }}
+      />
     </div>
   );
 }
@@ -233,7 +267,7 @@ function DriversListPage() {
 /*  Table view                                                                */
 /* -------------------------------------------------------------------------- */
 
-function DriversTable({ rows }: { rows: FixtureDriver[] }) {
+function DriversTable({ rows }: { rows: DriverListItem[] }) {
   const navigate = useNavigate();
   return (
     <Table>
@@ -250,31 +284,43 @@ function DriversTable({ rows }: { rows: FixtureDriver[] }) {
       </TableHeader>
       <TableBody>
         {rows.map((d) => {
-          const exp = driverNextExpiration(d);
-          const expired = exp.days < 0;
-          const soon = !expired && exp.days <= 30;
+          const exp = nextExpiration(d);
+          const expired = exp.days != null && exp.days < 0;
+          const soon =
+            !expired && exp.days != null && exp.days <= 30;
+          const onRowClick = () => {
+            if (d.id)
+              navigate({
+                to: "/admin/drivers/$driverId",
+                params: { driverId: d.id },
+              });
+          };
+          const fullName =
+            [d.firstName, d.lastName].filter(Boolean).join(" ") || d.email;
           return (
             <TableRow
-              key={d.id}
-              className="cursor-pointer"
-              onClick={() =>
-                navigate({
-                  to: "/admin/drivers/$driverId",
-                  params: { driverId: d.id },
-                })
-              }
+              key={d.userId}
+              className={d.id ? "cursor-pointer" : undefined}
+              onClick={onRowClick}
             >
               <TableCell>
                 <div className="flex items-center gap-2.5">
-                  <DriverAvatar first={d.firstName} last={d.lastName} />
+                  <DriverAvatar
+                    first={d.firstName ?? d.email}
+                    last={d.lastName ?? ""}
+                  />
                   <div className="flex flex-col">
-                    <Link
-                      to="/admin/drivers/$driverId"
-                      params={{ driverId: d.id }}
-                      className="text-sm font-semibold hover:text-[var(--primary)]"
-                    >
-                      {d.firstName} {d.lastName}
-                    </Link>
+                    {d.id ? (
+                      <Link
+                        to="/admin/drivers/$driverId"
+                        params={{ driverId: d.id }}
+                        className="text-sm font-semibold hover:text-[var(--primary)]"
+                      >
+                        {fullName}
+                      </Link>
+                    ) : (
+                      <span className="text-sm font-semibold">{fullName}</span>
+                    )}
                     <span className="font-mono text-[11px] text-muted-foreground">
                       {d.cdlNumber || "—"}
                     </span>
@@ -286,12 +332,12 @@ function DriversTable({ rows }: { rows: FixtureDriver[] }) {
               </TableCell>
               <TableCell>
                 <div className="flex flex-col text-[12px] leading-snug">
-                  <span>{formatPhone(d.phone)}</span>
+                  <span>{d.phone ? formatPhone(d.phone) : "—"}</span>
                   <span className="text-muted-foreground">{d.email}</span>
                 </div>
               </TableCell>
               <TableCell className="text-sm">
-                {d.city}, {d.state}
+                {d.city && d.state ? `${d.city}, ${d.state}` : "—"}
               </TableCell>
               <TableCell>
                 {d.assignedTruck ? (
@@ -304,26 +350,30 @@ function DriversTable({ rows }: { rows: FixtureDriver[] }) {
                 )}
               </TableCell>
               <TableCell>
-                <div
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold",
-                    expired && "bg-[var(--danger)]/12 text-[var(--danger)]",
-                    soon && "bg-[var(--warning)]/18 text-[var(--warning)]",
-                    !expired && !soon && "bg-muted text-muted-foreground",
-                  )}
-                >
-                  {expired ? (
-                    <AlertTriangle className="size-3" />
-                  ) : (
-                    <CalendarClock className="size-3" />
-                  )}
-                  <span>
-                    {exp.label}{" "}
-                    {expired
-                      ? `expired ${Math.abs(exp.days)}d ago`
-                      : `${exp.days}d`}
-                  </span>
-                </div>
+                {exp.days == null ? (
+                  <span className="text-xs text-muted-foreground">—</span>
+                ) : (
+                  <div
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold",
+                      expired && "bg-[var(--danger)]/12 text-[var(--danger)]",
+                      soon && "bg-[var(--warning)]/18 text-[var(--warning)]",
+                      !expired && !soon && "bg-muted text-muted-foreground",
+                    )}
+                  >
+                    {expired ? (
+                      <AlertTriangle className="size-3" />
+                    ) : (
+                      <CalendarClock className="size-3" />
+                    )}
+                    <span>
+                      {exp.label}{" "}
+                      {expired
+                        ? `expired ${Math.abs(exp.days)}d ago`
+                        : `${exp.days}d`}
+                    </span>
+                  </div>
+                )}
               </TableCell>
               <TableCell className="text-right font-mono text-sm tabular-nums text-muted-foreground">
                 {d.loadsThisYear}
@@ -358,7 +408,7 @@ function DriverAvatar({
         cls,
       )}
     >
-      {initials}
+      {initials.toUpperCase()}
     </div>
   );
 }
@@ -367,30 +417,35 @@ function DriverAvatar({
 /*  Grid view — driver card                                                   */
 /* -------------------------------------------------------------------------- */
 
-function DriversGrid({ rows }: { rows: FixtureDriver[] }) {
+function DriversGrid({ rows }: { rows: DriverListItem[] }) {
   return (
     <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
       {rows.map((d) => (
-        <DriverCard key={d.id} driver={d} />
+        <DriverCard key={d.userId} driver={d} />
       ))}
     </div>
   );
 }
 
-function DriverCard({ driver: d }: { driver: FixtureDriver }) {
-  const exp = driverNextExpiration(d);
-  const expired = exp.days < 0;
-  const soon = !expired && exp.days <= 30;
+function DriverCard({ driver: d }: { driver: DriverListItem }) {
+  const exp = nextExpiration(d);
+  const expired = exp.days != null && exp.days < 0;
+  const soon = !expired && exp.days != null && exp.days <= 30;
+  const fullName =
+    [d.firstName, d.lastName].filter(Boolean).join(" ") || d.email;
 
   return (
     <article className="group flex flex-col overflow-hidden rounded-lg border border-border bg-[var(--background)] transition-all duration-150 hover:-translate-y-0.5 hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md)]">
-      {/* Header with avatar + status */}
       <div className="flex items-start justify-between gap-3 p-4 pb-3">
         <div className="flex items-center gap-3">
-          <DriverAvatar first={d.firstName} last={d.lastName} size="lg" />
+          <DriverAvatar
+            first={d.firstName ?? d.email}
+            last={d.lastName ?? ""}
+            size="lg"
+          />
           <div className="min-w-0 leading-tight">
             <p className="truncate text-[15px] font-semibold text-foreground">
-              {d.firstName} {d.lastName}
+              {fullName}
             </p>
             <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
               {d.cdlNumber || "CDL pending"}
@@ -400,7 +455,6 @@ function DriverCard({ driver: d }: { driver: FixtureDriver }) {
         <StatusPill kind="driver" status={d.status} />
       </div>
 
-      {/* Stats */}
       <div className="flex items-center justify-between gap-3 border-y border-border bg-muted/30 px-4 py-3">
         <div className="space-y-0.5">
           <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--subtle-foreground)]">
@@ -414,20 +468,27 @@ function DriverCard({ driver: d }: { driver: FixtureDriver }) {
               soon && "text-[var(--warning)]",
             )}
           >
-            {expired ? "Expired" : exp.days === 0 ? "Today" : `${exp.days}d`}
+            {exp.days == null
+              ? "—"
+              : expired
+                ? "Expired"
+                : exp.days === 0
+                  ? "Today"
+                  : `${exp.days}d`}
           </div>
-          <div className="text-[10px] text-muted-foreground">{exp.date}</div>
+          <div className="text-[10px] text-muted-foreground">
+            {exp.date ?? ""}
+          </div>
         </div>
       </div>
 
-      {/* Contact rows */}
       <div className="flex flex-col gap-1.5 px-4 py-3 text-[12px]">
-        <Row icon={Phone}>{formatPhone(d.phone)}</Row>
+        <Row icon={Phone}>{d.phone ? formatPhone(d.phone) : "—"}</Row>
         <Row icon={Mail}>
           <span className="truncate">{d.email}</span>
         </Row>
         <Row icon={MapPin}>
-          {d.city}, {d.state}
+          {d.city && d.state ? `${d.city}, ${d.state}` : "—"}
         </Row>
         <Row icon={Truck}>
           {d.assignedTruck ? (
@@ -442,7 +503,6 @@ function DriverCard({ driver: d }: { driver: FixtureDriver }) {
         </Row>
       </div>
 
-      {/* YTD loads footer */}
       <div className="flex items-center justify-between border-t border-border bg-muted/30 px-4 py-2.5 text-[12px]">
         <span className="font-semibold uppercase tracking-wider text-[var(--subtle-foreground)]">
           Loads YTD

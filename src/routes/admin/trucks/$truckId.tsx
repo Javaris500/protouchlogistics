@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import {
@@ -17,11 +18,11 @@ import type { LucideIcon } from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
-import { EmptyState } from "@/components/common/EmptyState";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
-import { Badge } from "@/components/ui/badge";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { CardSkeleton } from "@/components/common/Skeleton";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -37,9 +38,15 @@ import { Separator } from "@/components/ui/separator";
 import { StatusPill } from "@/components/ui/status-pill";
 import type { TruckStatus } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { FIXTURE_TRUCKS } from "@/lib/fixtures/trucks";
+import { errorMessage } from "@/lib/errors";
 import { daysUntil } from "@/lib/format";
 import { toast } from "@/lib/toast";
+import {
+  deleteTruck,
+  getTruck,
+  updateTruck,
+} from "@/server/functions/trucks";
+import { listLoadsAdmin } from "@/server/functions/loads";
 
 export const Route = createFileRoute("/admin/trucks/$truckId")({
   component: TruckDetailPage,
@@ -47,253 +54,318 @@ export const Route = createFileRoute("/admin/trucks/$truckId")({
 
 function TruckDetailPage() {
   const { truckId } = Route.useParams();
-  const truck = FIXTURE_TRUCKS.find((t) => t.id === truckId);
-
-  if (!truck) {
-    return (
-      <div className="flex flex-col gap-5">
-        <BackLink to="/admin/trucks">Back to trucks</BackLink>
-        <PageHeader eyebrow="Truck" title="Truck not found" />
-        <Card className="p-6">
-          <EmptyState
-            icon={TruckIcon}
-            variant="first-time"
-            title="We couldn't find that truck"
-            description="It may have been retired, or the link is out of date. Head back to the trucks list to pick another unit."
-            action={
-              <Button asChild variant="primary" size="sm">
-                <Link to="/admin/trucks">Back to trucks</Link>
-              </Button>
-            }
-          />
-        </Card>
-      </div>
-    );
-  }
-
-  const nextDoc = nextExpiring(truck);
-  const primary = primaryActionFor(truck.status);
+  const queryClient = useQueryClient();
   const [retireOpen, setRetireOpen] = React.useState(false);
+
+  const truckQuery = useQuery({
+    queryKey: ["admin", "truck", truckId],
+    queryFn: () => getTruck({ data: { truckId } }),
+  });
+
+  const loadsQuery = useQuery({
+    queryKey: ["admin", "truck", truckId, "loads"],
+    queryFn: () =>
+      listLoadsAdmin({ data: { truckId, limit: 50, cursor: null } }),
+    enabled: truckQuery.isSuccess,
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: (status: TruckStatus) =>
+      updateTruck({ data: { truckId, patch: { status } } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "truck", truckId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "trucks"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteTruck({ data: { truckId } }),
+    onSuccess: () => {
+      toast.success("Truck retired");
+      queryClient.invalidateQueries({ queryKey: ["admin", "trucks"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
 
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/trucks">Back to trucks</BackLink>
 
-      <section className="animate-enter stagger-1 flex flex-col gap-5">
-        <PageHeader
-          eyebrow="Truck"
-          title={
-            <span className="inline-flex flex-wrap items-center gap-3">
-              <span className="font-mono">Unit {truck.unitNumber}</span>
-              <StatusPill kind="truck" status={truck.status} />
-            </span>
-          }
-          description={`${truck.year} ${truck.make} ${truck.model}`}
-          actions={
+      <QueryBoundary
+        query={truckQuery}
+        skeleton={<CardSkeleton />}
+        errorTitle="Couldn't load truck"
+      >
+        {(detail) => {
+          const truck = detail.truck;
+          const nextDoc = nextExpiring(truck);
+          const primary = primaryActionFor(truck.status);
+          const assignedDriver = detail.assignedDriver;
+          return (
             <>
-              <Button
-                variant={primary.variant}
-                size="md"
-                onClick={() => toast.info(`${primary.label} — coming soon`)}
+              <section className="animate-enter stagger-1 flex flex-col gap-5">
+                <PageHeader
+                  eyebrow="Truck"
+                  title={
+                    <span className="inline-flex flex-wrap items-center gap-3">
+                      <span className="font-mono">
+                        Unit {truck.unitNumber}
+                      </span>
+                      <StatusPill kind="truck" status={truck.status} />
+                    </span>
+                  }
+                  description={`${truck.year} ${truck.make} ${truck.model}`}
+                  actions={
+                    <>
+                      <Button
+                        variant={primary.variant}
+                        size="md"
+                        onClick={() =>
+                          toast.info(`${primary.label} — coming soon`)
+                        }
+                      >
+                        <primary.icon className="size-4" />
+                        {primary.label}
+                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="icon"
+                            aria-label="More actions"
+                            className="rounded-md"
+                          >
+                            <MoreHorizontal className="size-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-52">
+                          <DropdownMenuLabel>Truck actions</DropdownMenuLabel>
+                          <DropdownMenuItem
+                            onSelect={() =>
+                              toast.info("Assign driver — coming soon")
+                            }
+                          >
+                            <UserPlus /> Assign driver
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={truck.status === "in_shop"}
+                            onSelect={() =>
+                              updateStatusMutation.mutate("in_shop")
+                            }
+                          >
+                            <Wrench /> Move to shop
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={truck.status === "out_of_service"}
+                            onSelect={() =>
+                              updateStatusMutation.mutate("out_of_service")
+                            }
+                          >
+                            <XCircle /> Out of service
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            variant="danger"
+                            onSelect={() => setRetireOpen(true)}
+                          >
+                            <XCircle /> Retire truck
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </>
+                  }
+                />
+
+                <SpecStrip
+                  chips={[
+                    { label: `${truck.year}` },
+                    { label: truck.make },
+                    { label: truck.model },
+                    {
+                      label: `VIN ${truck.vin.slice(-6)}`,
+                      mono: true,
+                      tooltip: truck.vin,
+                    },
+                    {
+                      label: `${truck.licensePlate} · ${truck.plateState}`,
+                      mono: true,
+                    },
+                  ]}
+                />
+
+                <KeyStatStrip
+                  stats={[
+                    {
+                      label: "Mileage",
+                      value: truck.currentMileage.toLocaleString(),
+                      sublabel: "miles driven",
+                      mono: true,
+                      emphasis: true,
+                    },
+                    {
+                      label: "Next expiration",
+                      value: nextDoc ? `${nextDoc.days}d` : "—",
+                      sublabel: nextDoc ? nextDoc.label : "All docs current",
+                      mono: !!nextDoc,
+                    },
+                    {
+                      label: "Assigned to",
+                      value: assignedDriver
+                        ? `${assignedDriver.firstName} ${assignedDriver.lastName[0]}.`
+                        : "Unassigned",
+                    },
+                  ]}
+                />
+              </section>
+
+              <Tabs
+                defaultValue="overview"
+                className="animate-enter stagger-2"
               >
-                <primary.icon className="size-4" />
-                {primary.label}
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    aria-label="More actions"
-                    className="rounded-md"
-                  >
-                    <MoreHorizontal className="size-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
-                  <DropdownMenuLabel>Truck actions</DropdownMenuLabel>
-                  <DropdownMenuItem
-                    onSelect={() => toast.info("Assign driver — coming soon")}
-                  >
-                    <UserPlus /> Assign driver
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={truck.status === "in_shop"}
-                    onSelect={() =>
-                      toast.success(`Truck ${truck.unitNumber} moved to shop`)
-                    }
-                  >
-                    <Wrench /> Move to shop
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    disabled={truck.status === "out_of_service"}
-                    onSelect={() =>
-                      toast.success(
-                        `Truck ${truck.unitNumber} marked out of service`,
-                      )
-                    }
-                  >
-                    <XCircle /> Out of service
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="danger"
-                    onSelect={() => setRetireOpen(true)}
-                  >
-                    <XCircle /> Retire truck
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          }
-        />
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="documents">Documents</TabsTrigger>
+                  <TabsTrigger value="history">Load history</TabsTrigger>
+                </TabsList>
 
-        {/* Spec strip — at-a-glance truck identity */}
-        <SpecStrip
-          chips={[
-            { label: `${truck.year}` },
-            { label: truck.make },
-            { label: truck.model },
-            {
-              label: `VIN ${truck.vin.slice(-6)}`,
-              mono: true,
-              tooltip: truck.vin,
-            },
-            {
-              label: `${truck.licensePlate} · ${truck.plateState}`,
-              mono: true,
-            },
-          ]}
-        />
+                <TabsContent value="overview" className="mt-4">
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <Panel
+                      icon={TruckIcon}
+                      title="Vehicle"
+                      className="lg:col-span-2"
+                    >
+                      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
+                        <Field label="Year" value={String(truck.year)} mono />
+                        <Field label="Make" value={truck.make} />
+                        <Field label="Model" value={truck.model} />
+                        <Field label="VIN" value={truck.vin} mono />
+                        <Field
+                          label="Plate"
+                          value={`${truck.licensePlate} · ${truck.plateState}`}
+                          mono
+                        />
+                        <Field
+                          label="Mileage"
+                          value={truck.currentMileage.toLocaleString()}
+                          mono
+                        />
+                      </dl>
+                    </Panel>
 
-        <KeyStatStrip
-          stats={[
-            {
-              label: "Mileage",
-              value: truck.currentMileage.toLocaleString(),
-              sublabel: "miles driven",
-              mono: true,
-              emphasis: true,
-            },
-            {
-              label: "Next expiration",
-              value: nextDoc ? `${nextDoc.days}d` : "—",
-              sublabel: nextDoc ? nextDoc.label : "All docs current",
-              mono: !!nextDoc,
-            },
-            {
-              label: "Assigned to",
-              value: truck.assignedDriver
-                ? `${truck.assignedDriver.firstName} ${truck.assignedDriver.lastName[0]}.`
-                : "Unassigned",
-            },
-          ]}
-        />
-      </section>
-
-      <Tabs defaultValue="overview" className="animate-enter stagger-2">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="documents">Documents</TabsTrigger>
-          <TabsTrigger value="history">Load history</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Panel icon={TruckIcon} title="Vehicle" className="lg:col-span-2">
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
-                <Field label="Year" value={String(truck.year)} mono />
-                <Field label="Make" value={truck.make} />
-                <Field label="Model" value={truck.model} />
-                <Field label="VIN" value={truck.vin} mono />
-                <Field
-                  label="Plate"
-                  value={`${truck.licensePlate} · ${truck.plateState}`}
-                  mono
-                />
-                <Field
-                  label="Mileage"
-                  value={truck.currentMileage.toLocaleString()}
-                  mono
-                />
-              </dl>
-            </Panel>
-
-            <Panel icon={Gauge} title="Assignment">
-              {truck.assignedDriver ? (
-                <div className="flex flex-col gap-3">
-                  <EntityChip
-                    kind="driver"
-                    id={truck.assignedDriver.id}
-                    label={`${truck.assignedDriver.firstName} ${truck.assignedDriver.lastName}`}
-                  />
-                  <div className="rounded-md bg-[var(--surface-2)] px-3 py-2 text-[11px] text-muted-foreground">
-                    Default driver for Unit {truck.unitNumber}. Reassign from
-                    the driver's profile or the load dispatcher.
+                    <Panel icon={Gauge} title="Assignment">
+                      {assignedDriver ? (
+                        <div className="flex flex-col gap-3">
+                          <EntityChip
+                            kind="driver"
+                            id={assignedDriver.id}
+                            label={`${assignedDriver.firstName} ${assignedDriver.lastName}`}
+                          />
+                          <div className="rounded-md bg-[var(--surface-2)] px-3 py-2 text-[11px] text-muted-foreground">
+                            Default driver for Unit {truck.unitNumber}.
+                            Reassign from the driver's profile or the load
+                            dispatcher.
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-start gap-3">
+                          <p className="text-sm text-muted-foreground">
+                            This truck has no default driver.
+                          </p>
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() =>
+                              toast.info("Assign driver — coming soon")
+                            }
+                          >
+                            <UserPlus className="size-4" /> Assign driver
+                          </Button>
+                        </div>
+                      )}
+                    </Panel>
                   </div>
-                </div>
-              ) : (
-                <div className="flex flex-col items-start gap-3">
-                  <p className="text-sm text-muted-foreground">
-                    This truck has no default driver.
-                  </p>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    onClick={() => toast.info("Assign driver — coming soon")}
-                  >
-                    <UserPlus className="size-4" /> Assign driver
-                  </Button>
-                </div>
-              )}
-            </Panel>
-          </div>
-        </TabsContent>
+                </TabsContent>
 
-        <TabsContent value="documents" className="mt-4">
-          <Card className="gap-0 p-0">
-            <ul className="divide-y divide-border">
-              <DocRow
-                label="Registration"
-                date={truck.registrationExpiration}
+                <TabsContent value="documents" className="mt-4">
+                  <Card className="gap-0 p-0">
+                    <ul className="divide-y divide-border">
+                      <DocRow
+                        label="Registration"
+                        date={truck.registrationExpiration}
+                      />
+                      <DocRow
+                        label="Insurance"
+                        date={truck.insuranceExpiration}
+                      />
+                      <DocRow
+                        label="Annual inspection"
+                        date={truck.annualInspectionExpiration}
+                      />
+                    </ul>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="history" className="mt-4">
+                  {loadsQuery.data && loadsQuery.data.loads.length > 0 ? (
+                    <Card className="gap-0 p-0">
+                      <ul className="divide-y divide-border">
+                        {loadsQuery.data.loads.map((l) => (
+                          <li
+                            key={l.id}
+                            className="flex items-center justify-between gap-3 px-5 py-3"
+                          >
+                            <div className="flex min-w-0 flex-col">
+                              <Link
+                                to="/admin/loads/$loadId"
+                                params={{ loadId: l.id }}
+                                className="font-mono text-sm font-semibold hover:text-[var(--primary)]"
+                              >
+                                {l.loadNumber}
+                              </Link>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {l.broker.companyName}
+                              </span>
+                            </div>
+                            <StatusPill kind="load" status={l.status} />
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  ) : (
+                    <EmptyCard
+                      icon={Clock}
+                      title="No load history yet"
+                      description={`Past loads hauled by Unit ${truck.unitNumber} will appear here with miles, rates, and dates.`}
+                      action={
+                        <Button asChild variant="outline" size="sm">
+                          <Link to="/admin/loads">
+                            <MapPinned className="size-3.5" /> Open loads list
+                          </Link>
+                        </Button>
+                      }
+                    />
+                  )}
+                </TabsContent>
+              </Tabs>
+
+              <ConfirmDialog
+                open={retireOpen}
+                onOpenChange={setRetireOpen}
+                tone="danger"
+                title={`Retire truck ${truck.unitNumber}?`}
+                description="This removes the unit from the active fleet. It won't appear in dispatch pickers. This can't be undone."
+                confirmLabel="Retire truck"
+                onConfirm={() => {
+                  deleteMutation.mutate();
+                  setRetireOpen(false);
+                }}
               />
-              <DocRow label="Insurance" date={truck.insuranceExpiration} />
-              <DocRow
-                label="Annual inspection"
-                date={truck.annualInspectionExpiration}
-              />
-            </ul>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="history" className="mt-4">
-          <EmptyCard
-            icon={Clock}
-            title="No load history yet"
-            description="Past loads hauled by Unit will appear here with miles, rates, and dates."
-            action={
-              <Button asChild variant="outline" size="sm">
-                <Link to="/admin/loads">
-                  <MapPinned className="size-3.5" /> Open loads list
-                </Link>
-              </Button>
-            }
-          />
-        </TabsContent>
-      </Tabs>
-
-      <ConfirmDialog
-        open={retireOpen}
-        onOpenChange={setRetireOpen}
-        tone="danger"
-        title={`Retire truck ${truck.unitNumber}?`}
-        description="This removes the unit from the active fleet. It won't appear in dispatch pickers. This can't be undone."
-        confirmLabel="Retire truck"
-        onConfirm={() => {
-          toast.success(`Truck ${truck.unitNumber} retired`);
-          setRetireOpen(false);
+            </>
+          );
         }}
-      />
+      </QueryBoundary>
     </div>
   );
 }

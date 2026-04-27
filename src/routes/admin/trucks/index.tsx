@@ -1,3 +1,4 @@
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import {
   CalendarClock,
@@ -16,8 +17,9 @@ import {
 } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { TableSkeleton } from "@/components/common/Skeleton";
 import { ViewSwitcher } from "@/components/common/ViewSwitcher";
 import { FilterChips } from "@/components/data/FilterChips";
 import { Pagination } from "@/components/data/Pagination";
@@ -45,48 +47,87 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { EMPTY_COPY } from "@/lib/empty-copy";
-import { FIXTURE_TRUCKS, type FixtureTruck } from "@/lib/fixtures/trucks";
+import { errorMessage } from "@/lib/errors";
 import { daysUntil } from "@/lib/format";
+import { toast } from "@/lib/toast";
+import {
+  createTruck,
+  deleteTruck,
+  listTrucks,
+  updateTruck,
+} from "@/server/functions/trucks";
+
+type TruckRow = NonNullable<
+  Awaited<ReturnType<typeof listTrucks>>["trucks"][number]
+>;
 
 export const Route = createFileRoute("/admin/trucks/")({
   component: TrucksListPage,
 });
 
 type StatusFilter = "all" | TruckStatus | "expiring";
+type ViewMode = "table" | "grid";
 
 const PAGE_SIZE = 10;
 
-/** A truck is "expiring soon" if any doc expires within 30 days. */
-function isExpiring(t: FixtureTruck): boolean {
-  const dates = [
+function isExpiring(t: TruckRow): boolean {
+  return [
     t.registrationExpiration,
     t.insuranceExpiration,
     t.annualInspectionExpiration,
-  ];
-  return dates.some((d) => {
-    const days = daysUntil(d);
-    return days <= 30;
-  });
+  ].some((d) => daysUntil(d) <= 30);
 }
 
-type ViewMode = "table" | "grid";
-
 function TrucksListPage() {
+  const queryClient = useQueryClient();
   const [filter, setFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [view, setView] = useState<ViewMode>("table");
   const [addOpen, setAddOpen] = useState(false);
 
-  const filtered = useMemo(() => {
+  const trucksQuery = useQuery({
+    queryKey: ["admin", "trucks", { status: filter }],
+    queryFn: () =>
+      listTrucks({
+        data: {
+          status:
+            filter === "all" || filter === "expiring" ? undefined : filter,
+          limit: 200,
+          cursor: null,
+        },
+      }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: (input: {
+      unitNumber: string;
+      vin: string;
+      make: string;
+      model: string;
+      year: number;
+      licensePlate: string;
+      plateState: string;
+      status: TruckStatus;
+      registrationExpiration: string;
+      insuranceExpiration: string;
+      annualInspectionExpiration: string;
+      currentMileage: number;
+      notes: string | null;
+    }) => createTruck({ data: input }),
+    onSuccess: ({ truck }) => {
+      toast.success(`Truck ${truck.unitNumber} added`);
+      queryClient.invalidateQueries({ queryKey: ["admin", "trucks"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const allRows = trucksQuery.data?.trucks ?? [];
+
+  const visibleRows = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return FIXTURE_TRUCKS.filter((t) => {
-      if (filter === "expiring") {
-        if (!isExpiring(t)) return false;
-      } else if (filter !== "all" && t.status !== filter) {
-        return false;
-      }
+    return allRows.filter((t) => {
+      if (filter === "expiring" && !isExpiring(t)) return false;
       if (q) {
         const haystack = [
           t.unitNumber,
@@ -105,22 +146,21 @@ function TrucksListPage() {
       }
       return true;
     });
-  }, [filter, search]);
+  }, [allRows, filter, search]);
 
   const counts = useMemo(
     () => ({
-      all: FIXTURE_TRUCKS.length,
-      active: FIXTURE_TRUCKS.filter((t) => t.status === "active").length,
-      in_shop: FIXTURE_TRUCKS.filter((t) => t.status === "in_shop").length,
-      out_of_service: FIXTURE_TRUCKS.filter(
-        (t) => t.status === "out_of_service",
-      ).length,
-      expiring: FIXTURE_TRUCKS.filter(isExpiring).length,
+      all: allRows.length,
+      active: allRows.filter((t) => t.status === "active").length,
+      in_shop: allRows.filter((t) => t.status === "in_shop").length,
+      out_of_service: allRows.filter((t) => t.status === "out_of_service")
+        .length,
+      expiring: allRows.filter(isExpiring).length,
     }),
-    [],
+    [allRows],
   );
 
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const pageRows = visibleRows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div className="flex flex-col gap-5">
@@ -183,80 +223,98 @@ function TrucksListPage() {
           </div>
         </div>
 
-        {FIXTURE_TRUCKS.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              icon={Truck}
-              variant={EMPTY_COPY["trucks.firstTime"].variant}
-              title={EMPTY_COPY["trucks.firstTime"].title}
-              description={EMPTY_COPY["trucks.firstTime"].description}
-              action={
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => setAddOpen(true)}
-                >
-                  <Plus className="size-4" />
-                  {EMPTY_COPY["trucks.firstTime"].ctaLabel}
-                </Button>
-              }
-            />
-          </div>
-        ) : pageRows.length === 0 ? (
-          <div className="p-6">
-            <EmptyState
-              icon={Truck}
-              variant={EMPTY_COPY["trucks.filter"].variant}
-              title={EMPTY_COPY["trucks.filter"].title}
-              description={EMPTY_COPY["trucks.filter"].description}
-              action={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setFilter("all");
-                    setSearch("");
-                    setPage(1);
-                  }}
-                >
-                  {EMPTY_COPY["trucks.filter"].ctaLabel}
-                </Button>
-              }
-            />
-          </div>
-        ) : view === "table" ? (
-          <>
-            <TrucksTable rows={pageRows} />
-            <div className="border-t border-border p-3">
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filtered.length}
-                onPageChange={setPage}
-              />
-            </div>
-          </>
-        ) : (
-          <>
-            <TrucksGrid rows={pageRows} />
-            <div className="border-t border-border p-3">
-              <Pagination
-                page={page}
-                pageSize={PAGE_SIZE}
-                total={filtered.length}
-                onPageChange={setPage}
-              />
-            </div>
-          </>
-        )}
+        <QueryBoundary
+          query={trucksQuery}
+          emptyKey={
+            allRows.length === 0 ? "trucks.firstTime" : "trucks.filter"
+          }
+          isEmpty={() => pageRows.length === 0}
+          skeleton={
+            <TableSkeleton rows={PAGE_SIZE} cols={9} className="m-3" />
+          }
+          emptyAction={
+            allRows.length === 0 ? (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => setAddOpen(true)}
+              >
+                <Plus className="size-4" />
+                Add truck
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setFilter("all");
+                  setSearch("");
+                  setPage(1);
+                }}
+              >
+                Clear filters
+              </Button>
+            )
+          }
+        >
+          {() =>
+            view === "table" ? (
+              <>
+                <TrucksTable rows={pageRows} />
+                <div className="border-t border-border p-3">
+                  <Pagination
+                    page={page}
+                    pageSize={PAGE_SIZE}
+                    total={visibleRows.length}
+                    onPageChange={setPage}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <TrucksGrid rows={pageRows} />
+                <div className="border-t border-border p-3">
+                  <Pagination
+                    page={page}
+                    pageSize={PAGE_SIZE}
+                    total={visibleRows.length}
+                    onPageChange={setPage}
+                  />
+                </div>
+              </>
+            )
+          }
+        </QueryBoundary>
       </Card>
 
-      <AddTruckDialog open={addOpen} onOpenChange={setAddOpen} />
+      <AddTruckDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        onSubmit={async (values) => {
+          await createMutation.mutateAsync({
+            unitNumber: values.unitNumber.trim(),
+            vin: values.vin.trim().toUpperCase(),
+            make: values.make.trim(),
+            model: values.model.trim(),
+            year: Number.parseInt(values.year, 10),
+            licensePlate: values.licensePlate.trim().toUpperCase(),
+            plateState: values.plateState.trim().toUpperCase(),
+            status: values.status,
+            registrationExpiration: values.registrationExpiration,
+            insuranceExpiration: values.insuranceExpiration,
+            annualInspectionExpiration: values.annualInspectionExpiration,
+            currentMileage: values.currentMileage
+              ? Number.parseInt(values.currentMileage, 10)
+              : 0,
+            notes: values.notes.trim() || null,
+          });
+        }}
+      />
     </div>
   );
 }
 
-function TrucksTable({ rows }: { rows: FixtureTruck[] }) {
+function TrucksTable({ rows }: { rows: TruckRow[] }) {
   const navigate = useNavigate();
   return (
     <Table>
@@ -355,7 +413,25 @@ function TrucksTable({ rows }: { rows: FixtureTruck[] }) {
   );
 }
 
-function TruckRowActions({ truck }: { truck: FixtureTruck }) {
+function TruckRowActions({ truck }: { truck: TruckRow }) {
+  const queryClient = useQueryClient();
+  const updateMutation = useMutation({
+    mutationFn: (status: TruckStatus) =>
+      updateTruck({ data: { truckId: truck.id, patch: { status } } }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "trucks"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+  const deleteMutation = useMutation({
+    mutationFn: () => deleteTruck({ data: { truckId: truck.id } }),
+    onSuccess: () => {
+      toast.success(`Truck ${truck.unitNumber} retired`);
+      queryClient.invalidateQueries({ queryKey: ["admin", "trucks"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -371,25 +447,34 @@ function TruckRowActions({ truck }: { truck: FixtureTruck }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel>Unit {truck.unitNumber}</DropdownMenuLabel>
-        <DropdownMenuItem>
+        <DropdownMenuItem disabled>
           <Pencil />
           Edit details
         </DropdownMenuItem>
-        <DropdownMenuItem>
+        <DropdownMenuItem disabled>
           <UserPlus />
           Assign driver
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem disabled={truck.status === "in_shop"}>
+        <DropdownMenuItem
+          disabled={truck.status === "in_shop"}
+          onSelect={() => updateMutation.mutate("in_shop")}
+        >
           <Wrench />
           Move to shop
         </DropdownMenuItem>
-        <DropdownMenuItem disabled={truck.status === "out_of_service"}>
+        <DropdownMenuItem
+          disabled={truck.status === "out_of_service"}
+          onSelect={() => updateMutation.mutate("out_of_service")}
+        >
           <XCircle />
           Out of service
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="danger">
+        <DropdownMenuItem
+          variant="danger"
+          onSelect={() => deleteMutation.mutate()}
+        >
           <Trash2 />
           Retire truck
         </DropdownMenuItem>
@@ -410,11 +495,7 @@ function DriverAvatar({ first, last }: { first: string; last: string }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Grid view — visual card per truck                                         */
-/* -------------------------------------------------------------------------- */
-
-function TrucksGrid({ rows }: { rows: FixtureTruck[] }) {
+function TrucksGrid({ rows }: { rows: TruckRow[] }) {
   return (
     <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
       {rows.map((t) => (
@@ -424,7 +505,7 @@ function TrucksGrid({ rows }: { rows: FixtureTruck[] }) {
   );
 }
 
-function TruckCard({ truck: t }: { truck: FixtureTruck }) {
+function TruckCard({ truck: t }: { truck: TruckRow }) {
   const nextExp = nextExpirationLabel(t);
   const urgent = nextExp.days <= 30;
 
@@ -438,7 +519,6 @@ function TruckCard({ truck: t }: { truck: FixtureTruck }) {
         "border-border hover:-translate-y-0.5 hover:border-[var(--border-strong)] hover:shadow-[var(--shadow-md)]",
       )}
     >
-      {/* Top accent bar follows status tone */}
       <div
         className={cn(
           "h-1 w-full",
@@ -449,7 +529,6 @@ function TruckCard({ truck: t }: { truck: FixtureTruck }) {
       />
 
       <div className="flex flex-col gap-4 p-4">
-        {/* Header — unit + status */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-[var(--surface-2)] to-[var(--surface-3)] text-muted-foreground">
@@ -467,7 +546,6 @@ function TruckCard({ truck: t }: { truck: FixtureTruck }) {
           <StatusPill kind="truck" status={t.status} />
         </div>
 
-        {/* Stats row */}
         <div className="grid grid-cols-2 gap-3 border-y border-border py-3">
           <StatBlock
             icon={Gauge}
@@ -489,7 +567,6 @@ function TruckCard({ truck: t }: { truck: FixtureTruck }) {
           />
         </div>
 
-        {/* Driver + plate */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-[12px]">
           <div className="flex items-center gap-1.5 text-muted-foreground">
             <UserRound className="size-3.5" />
@@ -552,7 +629,7 @@ function StatBlock({
   );
 }
 
-function nextExpirationLabel(t: FixtureTruck): {
+function nextExpirationLabel(t: TruckRow): {
   label: "Registration" | "Insurance" | "Inspection";
   days: number;
 } {
@@ -561,14 +638,8 @@ function nextExpirationLabel(t: FixtureTruck): {
     { label: "Insurance" as const, date: t.insuranceExpiration },
     { label: "Inspection" as const, date: t.annualInspectionExpiration },
   ];
-  const now = Date.now();
-  const withDays = items.map((i) => ({
-    ...i,
-    days: Math.floor(
-      (new Date(i.date).getTime() - now) / (1000 * 60 * 60 * 24),
-    ),
-  }));
-  const sorted = withDays.sort((a, b) => a.days - b.days);
-  // Safe: items array is non-empty by construction.
+  const sorted = items
+    .map((i) => ({ ...i, days: daysUntil(i.date) }))
+    .sort((a, b) => a.days - b.days);
   return sorted[0] ?? { label: "Registration", days: 0 };
 }

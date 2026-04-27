@@ -1,4 +1,5 @@
-import { createFileRoute, notFound } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import {
   Building2,
@@ -23,11 +24,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { toast } from "@/lib/toast";
+import { errorMessage } from "@/lib/errors";
 import { BackLink } from "@/components/common/BackLink";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { CardSkeleton } from "@/components/common/Skeleton";
 import {
   LOAD_PROGRESS_STEPS,
   StatusProgressBar,
@@ -49,36 +53,125 @@ import { Separator } from "@/components/ui/separator";
 import { StatusPill } from "@/components/ui/status-pill";
 import type { LoadStatus } from "@/components/ui/status-pill";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { FixtureLoad } from "@/lib/fixtures/loads";
-import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
 import {
   formatDateShort,
   formatMoneyCents,
   formatRelativeFromNow,
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  cancelLoad as cancelLoadFn,
+  getLoadAdmin,
+  updateLoadDriverPay,
+  updateLoadStatus,
+} from "@/server/functions/loads";
+
+type LoadDetail = Awaited<ReturnType<typeof getLoadAdmin>>;
+type LoadStop = LoadDetail["stops"][number];
+type LoadDocument = LoadDetail["documents"][number];
+type LoadHistoryEntry = LoadDetail["history"][number];
 
 export const Route = createFileRoute("/admin/loads/$loadId")({
-  loader: ({ params }) => {
-    const load = FIXTURE_LOADS.find((l) => l.id === params.loadId);
-    if (!load) throw notFound();
-    return { load };
-  },
   component: LoadDetailPage,
 });
 
 function LoadDetailPage() {
-  const { load } = Route.useLoaderData();
-  // Pay is editable until the load is marked completed. We hold it in local
-  // state so the inline editor can optimistically reflect updates without a
-  // server round-trip (stubbed until backend lands).
-  const [status, setStatus] = React.useState<LoadStatus>(load.status);
-  const [driverPayCents, setDriverPayCents] = React.useState<number | null>(
-    load.driverPayCents,
+  const { loadId } = Route.useParams();
+  const queryClient = useQueryClient();
+
+  const loadQuery = useQuery({
+    queryKey: ["admin", "load", loadId],
+    queryFn: () => getLoadAdmin({ data: { loadId } }),
+  });
+
+  const updatePayMutation = useMutation({
+    mutationFn: (driverPayCents: number | null) =>
+      updateLoadDriverPay({ data: { loadId, driverPayCents } }),
+    onSuccess: () => {
+      toast.success("Driver pay updated");
+      queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "loads"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const updateStatusMutation = useMutation({
+    mutationFn: (toStatus: LoadStatus) =>
+      updateLoadStatus({ data: { loadId, toStatus } }),
+    onSuccess: ({ toStatus }) => {
+      toast.success(`Load marked ${toStatus.replace(/_/g, " ")}`);
+      queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "loads"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: (reason: string) =>
+      cancelLoadFn({ data: { loadId, reason } }),
+    onSuccess: () => {
+      toast.success("Load cancelled");
+      queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+      queryClient.invalidateQueries({ queryKey: ["admin", "loads"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  return (
+    <div className="flex flex-col gap-5">
+      <BackLink to="/admin/loads">Back to loads</BackLink>
+
+      <QueryBoundary
+        query={loadQuery}
+        skeleton={<CardSkeleton />}
+        errorTitle="Couldn't load this load"
+      >
+        {(detail) => (
+          <LoadDetailBody
+            detail={detail}
+            onPaySave={(cents) => updatePayMutation.mutate(cents)}
+            onMarkComplete={() => updateStatusMutation.mutate("completed")}
+            onCancel={(reason) => cancelMutation.mutate(reason)}
+            payIsPending={updatePayMutation.isPending}
+            statusIsPending={updateStatusMutation.isPending}
+          />
+        )}
+      </QueryBoundary>
+    </div>
   );
-  const [driverPayUpdatedAt, setDriverPayUpdatedAt] = React.useState<
-    string | null
-  >(load.driverPayUpdatedAt);
+}
+
+interface LoadDetailBodyProps {
+  detail: LoadDetail;
+  onPaySave: (cents: number | null) => void;
+  onMarkComplete: () => void;
+  onCancel: (reason: string) => void;
+  payIsPending: boolean;
+  statusIsPending: boolean;
+}
+
+function LoadDetailBody({
+  detail,
+  onPaySave,
+  onMarkComplete,
+  onCancel,
+  payIsPending,
+  statusIsPending,
+}: LoadDetailBodyProps) {
+  const load = detail.load;
+  const broker = detail.broker;
+  const driver = detail.driver;
+  const truck = detail.truck;
+  const stops = detail.stops;
+  const pickup = stops.find((s) => s.stopType === "pickup") ?? null;
+  const delivery =
+    [...stops].reverse().find((s) => s.stopType === "delivery") ?? null;
+
+  const status = load.status;
+  const driverPayCents = load.driverPayCents;
+  const driverPayUpdatedAt = load.driverPayUpdatedAt;
+  const isCompleted = status === "completed";
+
   const [confirmAssignOpen, setConfirmAssignOpen] = React.useState(false);
   const [cancelLoadOpen, setCancelLoadOpen] = React.useState(false);
   const payInputRef = React.useRef<HTMLInputElement>(null);
@@ -91,8 +184,6 @@ function LoadDetailPage() {
       ? Math.round(load.rateCents / load.miles)
       : null;
 
-  const isCompleted = status === "completed";
-
   const focusPayInput = () => {
     payBlockRef.current?.scrollIntoView({
       behavior: "smooth",
@@ -101,42 +192,25 @@ function LoadDetailPage() {
     window.setTimeout(() => payInputRef.current?.focus(), 200);
   };
 
-  const finalizeAssign = () => {
-    // Stubbed — real assignment flow lands with the driver picker dialog.
-    toast.success(`Assigned — load ${load.loadNumber}`);
-  };
-
   const handlePrimary = () => {
-    // Mark-complete is blocked if pay isn't recorded. Surface the pay editor
-    // with a toast + scroll so the admin knows what to fix.
     if (primary.label === "Mark completed") {
       if (driverPayCents === null) {
         toast.error("Enter driver pay before closing this load");
         focusPayInput();
         return;
       }
-      setStatus("completed");
-      toast.success(`Load ${load.loadNumber} marked completed`);
+      onMarkComplete();
       return;
     }
-    // Assigning a driver while pay is blank: soft-warn, same as LoadNew flow.
     if (primary.label === "Assign driver" && driverPayCents === null) {
       setConfirmAssignOpen(true);
       return;
     }
-    toast.success(`${primary.label} — load ${load.loadNumber}`);
-  };
-
-  const handlePaySave = (nextCents: number | null) => {
-    setDriverPayCents(nextCents);
-    setDriverPayUpdatedAt(new Date().toISOString());
+    toast.info(`${primary.label} — coming soon`);
   };
 
   return (
-    <div className="flex flex-col gap-5">
-      <BackLink to="/admin/loads">Back to loads</BackLink>
-
-      {/* Hero — identity + route */}
+    <>
       <section className="animate-enter stagger-1 flex flex-col gap-5">
         <PageHeader
           eyebrow="Load"
@@ -156,12 +230,14 @@ function LoadDetailPage() {
                   </span>
                 </span>
               )}
-              <EntityChip
-                kind="broker"
-                id={load.broker.id}
-                label={load.broker.companyName}
-                size="sm"
-              />
+              {broker && (
+                <EntityChip
+                  kind="broker"
+                  id={broker.id}
+                  label={broker.companyName}
+                  size="sm"
+                />
+              )}
             </span>
           }
           actions={
@@ -170,6 +246,7 @@ function LoadDetailPage() {
                 variant={primary.variant}
                 size="md"
                 onClick={handlePrimary}
+                disabled={statusIsPending}
               >
                 <primary.icon className="size-4" />
                 {primary.label}
@@ -213,7 +290,7 @@ function LoadDetailPage() {
           }
         />
 
-        <RouteBand load={load} />
+        <RouteBand pickup={pickup} delivery={delivery} miles={load.miles} />
 
         <KeyStatStrip
           stats={[
@@ -247,7 +324,8 @@ function LoadDetailPage() {
           payUpdatedAt={driverPayUpdatedAt}
           createdAt={load.createdAt}
           readOnly={isCompleted}
-          onSave={handlePaySave}
+          isSaving={payIsPending}
+          onSave={onPaySave}
         />
 
         <Card className="p-4 sm:p-5">
@@ -271,20 +349,8 @@ function LoadDetailPage() {
         <TabsContent value="overview" className="mt-4">
           <div className="grid gap-4 lg:grid-cols-3">
             <div className="flex flex-col gap-4 lg:col-span-2">
-              <StopCard
-                kind="pickup"
-                city={load.pickup.city}
-                state={load.pickup.state}
-                windowStart={load.pickup.windowStart}
-                windowEnd={load.pickup.windowEnd}
-              />
-              <StopCard
-                kind="delivery"
-                city={load.delivery.city}
-                state={load.delivery.state}
-                windowStart={load.delivery.windowStart}
-                windowEnd={load.delivery.windowEnd}
-              />
+              {pickup && <StopCard kind="pickup" stop={pickup} />}
+              {delivery && <StopCard kind="delivery" stop={delivery} />}
               <Panel icon={Package} title="Cargo">
                 <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm sm:grid-cols-3">
                   <Field label="Commodity" value={load.commodity} />
@@ -307,16 +373,18 @@ function LoadDetailPage() {
             <div className="flex flex-col gap-4">
               <Panel icon={Building2} title="Broker & rate">
                 <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1">
-                    <Label>Broker</Label>
-                    <div>
-                      <EntityChip
-                        kind="broker"
-                        id={load.broker.id}
-                        label={load.broker.companyName}
-                      />
+                  {broker && (
+                    <div className="flex flex-col gap-1">
+                      <Label>Broker</Label>
+                      <div>
+                        <EntityChip
+                          kind="broker"
+                          id={broker.id}
+                          label={broker.companyName}
+                        />
+                      </div>
                     </div>
-                  </div>
+                  )}
                   <Field
                     label="Line-haul"
                     value={formatMoneyCents(load.rateCents)}
@@ -336,12 +404,12 @@ function LoadDetailPage() {
                 <div className="flex flex-col gap-3">
                   <div className="flex flex-col gap-1">
                     <Label>Driver</Label>
-                    {load.driver ? (
+                    {driver ? (
                       <div>
                         <EntityChip
                           kind="driver"
-                          id={load.driver.id}
-                          label={`${load.driver.firstName} ${load.driver.lastName}`}
+                          id={driver.id}
+                          label={`${driver.firstName} ${driver.lastName}`}
                         />
                       </div>
                     ) : (
@@ -352,12 +420,12 @@ function LoadDetailPage() {
                   </div>
                   <div className="flex flex-col gap-1">
                     <Label>Truck</Label>
-                    {load.truck ? (
+                    {truck ? (
                       <div>
                         <EntityChip
                           kind="truck"
-                          id={load.truck.id}
-                          label={`Unit ${load.truck.unitNumber}`}
+                          id={truck.id}
+                          label={`Unit ${truck.unitNumber}`}
                           mono
                         />
                       </div>
@@ -372,11 +440,14 @@ function LoadDetailPage() {
         </TabsContent>
 
         <TabsContent value="documents" className="mt-4">
-          <LoadDocumentsPanel load={load} />
+          <LoadDocumentsPanel
+            loadStatus={status}
+            documents={detail.documents}
+          />
         </TabsContent>
 
         <TabsContent value="history" className="mt-4">
-          <HistoryTimeline load={load} />
+          <HistoryTimeline history={detail.history} />
         </TabsContent>
 
         <TabsContent value="tracking" className="mt-4">
@@ -407,7 +478,7 @@ function LoadDetailPage() {
         onCancel={focusPayInput}
         onConfirm={() => {
           setConfirmAssignOpen(false);
-          finalizeAssign();
+          toast.info("Driver picker — coming soon");
         }}
       />
 
@@ -426,19 +497,14 @@ function LoadDetailPage() {
           required: true,
         }}
         onConfirm={(reason) => {
-          toast.success(`Load ${load.loadNumber} cancelled`);
+          if (!reason) return;
+          onCancel(reason);
           setCancelLoadOpen(false);
-          // reason is captured for the server function call when backend is wired
-          void reason;
         }}
       />
-    </div>
+    </>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Driver pay block — prominent display + inline edit                        */
-/* -------------------------------------------------------------------------- */
 
 interface DriverPayBlockProps {
   inputRef: React.RefObject<HTMLInputElement | null>;
@@ -446,12 +512,13 @@ interface DriverPayBlockProps {
   payUpdatedAt: string | null;
   createdAt: string;
   readOnly: boolean;
+  isSaving: boolean;
   onSave: (nextCents: number | null) => void;
 }
 
 const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
   function DriverPayBlock(
-    { inputRef, payCents, payUpdatedAt, createdAt, readOnly, onSave },
+    { inputRef, payCents, payUpdatedAt, createdAt, readOnly, isSaving, onSave },
     ref,
   ) {
     const [editing, setEditing] = React.useState(false);
@@ -459,7 +526,6 @@ const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
       payCents === null ? "" : (payCents / 100).toFixed(2),
     );
 
-    // Keep draft in sync when external pay changes (e.g. after save).
     React.useEffect(() => {
       setDraft(payCents === null ? "" : (payCents / 100).toFixed(2));
     }, [payCents]);
@@ -485,7 +551,6 @@ const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
       }
       onSave(next);
       setEditing(false);
-      toast.success("Driver pay updated");
     };
 
     const cancel = () => {
@@ -540,6 +605,7 @@ const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
                           cancel();
                         }
                       }}
+                      disabled={isSaving}
                     />
                   </div>
                   <Button
@@ -547,6 +613,7 @@ const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
                     variant="primary"
                     size="sm"
                     onClick={commit}
+                    disabled={isSaving}
                   >
                     <Check className="size-3.5" />
                     Save
@@ -556,6 +623,7 @@ const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
                     variant="ghost"
                     size="sm"
                     onClick={cancel}
+                    disabled={isSaving}
                   >
                     <X className="size-3.5" />
                   </Button>
@@ -603,31 +671,35 @@ const DriverPayBlock = React.forwardRef<HTMLDivElement, DriverPayBlockProps>(
   },
 );
 
-/* -------------------------------------------------------------------------- */
-/*  Route band — cities + arrow + miles                                       */
-/* -------------------------------------------------------------------------- */
-
-function RouteBand({ load }: { load: FixtureLoad }) {
+function RouteBand({
+  pickup,
+  delivery,
+  miles,
+}: {
+  pickup: LoadStop | null;
+  delivery: LoadStop | null;
+  miles: number | null;
+}) {
   return (
     <Card className="overflow-hidden p-0">
       <div className="grid grid-cols-[1fr_auto_1fr] items-stretch">
         <RouteEndpoint
           icon={MapPin}
           label="Pickup"
-          city={load.pickup.city}
-          state={load.pickup.state}
-          date={load.pickup.windowStart}
+          city={pickup?.city ?? "—"}
+          state={pickup?.state ?? ""}
+          date={pickup?.windowStart ?? null}
           tone="neutral"
         />
         <div className="flex flex-col items-center justify-center gap-1 border-x border-border bg-[var(--surface)] px-3 py-4 sm:px-5">
-          <ArrowBand miles={load.miles} />
+          <ArrowBand miles={miles} />
         </div>
         <RouteEndpoint
           icon={MapPin}
           label="Delivery"
-          city={load.delivery.city}
-          state={load.delivery.state}
-          date={load.delivery.windowEnd}
+          city={delivery?.city ?? "—"}
+          state={delivery?.state ?? ""}
+          date={delivery?.windowEnd ?? null}
           tone="primary"
         />
       </div>
@@ -647,7 +719,7 @@ function RouteEndpoint({
   label: string;
   city: string;
   state: string;
-  date: string;
+  date: string | null;
   tone: "neutral" | "primary";
 }) {
   return (
@@ -662,11 +734,11 @@ function RouteEndpoint({
       </div>
       <div className="text-base font-semibold tracking-tight sm:text-lg">
         {city}
-        <span className="ml-1 text-muted-foreground">{state}</span>
+        {state && <span className="ml-1 text-muted-foreground">{state}</span>}
       </div>
       <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
         <Calendar className="size-3" />
-        {formatDateShort(date)}
+        {date ? formatDateShort(date) : "—"}
       </div>
     </div>
   );
@@ -692,22 +764,12 @@ function ArrowBand({ miles }: { miles: number | null }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Stop card                                                                 */
-/* -------------------------------------------------------------------------- */
-
 function StopCard({
   kind,
-  city,
-  state,
-  windowStart,
-  windowEnd,
+  stop,
 }: {
   kind: "pickup" | "delivery";
-  city: string;
-  state: string;
-  windowStart: string;
-  windowEnd: string;
+  stop: LoadStop;
 }) {
   const isPickup = kind === "pickup";
   return (
@@ -722,91 +784,42 @@ function StopCard({
     >
       <div className="flex flex-col gap-2">
         <span className="text-base font-semibold">
-          {city}, <span className="text-muted-foreground">{state}</span>
+          {stop.city}, <span className="text-muted-foreground">{stop.state}</span>
         </span>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
           <Calendar className="size-3" />
-          {formatDateShort(windowStart)} → {formatDateShort(windowEnd)}
+          {formatDateShort(stop.windowStart)} →{" "}
+          {formatDateShort(stop.windowEnd)}
         </div>
       </div>
     </Panel>
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Documents — real rows with expected/uploaded states                       */
-/* -------------------------------------------------------------------------- */
+function LoadDocumentsPanel({
+  loadStatus,
+  documents,
+}: {
+  loadStatus: LoadStatus;
+  documents: LoadDocument[];
+}) {
+  // Build a quick-lookup of which spec types have been uploaded.
+  const byType = new Map<string, LoadDocument[]>();
+  for (const d of documents) {
+    const existing = byType.get(d.type) ?? [];
+    existing.push(d);
+    byType.set(d.type, existing);
+  }
 
-interface LoadDocSpec {
-  type: string;
-  label: string;
-  required: boolean;
-  /** When the load reaches this status, the doc should be expected. */
-  expectedAtOrAfter: LoadStatus;
-}
-
-const LOAD_DOC_SPECS: LoadDocSpec[] = [
-  {
-    type: "rate_confirmation",
-    label: "Rate confirmation",
-    required: true,
-    expectedAtOrAfter: "assigned",
-  },
-  {
-    type: "bol",
-    label: "Bill of lading",
-    required: true,
-    expectedAtOrAfter: "at_pickup",
-  },
-  {
-    type: "pod",
-    label: "Proof of delivery",
-    required: true,
-    expectedAtOrAfter: "delivered",
-  },
-  {
-    type: "lumper",
-    label: "Lumper receipt",
-    required: false,
-    expectedAtOrAfter: "delivered",
-  },
-  {
-    type: "scale_ticket",
-    label: "Scale ticket",
-    required: false,
-    expectedAtOrAfter: "at_pickup",
-  },
-];
-
-const STATUS_ORDER: LoadStatus[] = [
-  "draft",
-  "assigned",
-  "accepted",
-  "en_route_pickup",
-  "at_pickup",
-  "loaded",
-  "en_route_delivery",
-  "at_delivery",
-  "delivered",
-  "pod_uploaded",
-  "completed",
-];
-
-function isExpectedNow(load: FixtureLoad, spec: LoadDocSpec): boolean {
-  const loadIdx = STATUS_ORDER.indexOf(load.status);
-  const expIdx = STATUS_ORDER.indexOf(spec.expectedAtOrAfter);
-  return loadIdx >= expIdx;
-}
-
-function LoadDocumentsPanel({ load }: { load: FixtureLoad }) {
   return (
     <Card className="gap-0 p-0">
       <ul className="divide-y divide-border">
         {LOAD_DOC_SPECS.map((spec) => {
-          const expected = isExpectedNow(load, spec);
+          const expected = isExpectedNow(loadStatus, spec);
+          const uploaded = byType.get(spec.dbType) ?? [];
           return (
             <li
-              key={spec.type}
+              key={spec.dbType}
               className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"
             >
               <div className="flex min-w-0 items-center gap-3">
@@ -830,13 +843,17 @@ function LoadDocumentsPanel({ load }: { load: FixtureLoad }) {
                     )}
                   </span>
                   <span className="text-[11px] text-muted-foreground">
-                    {expected ? "Expected" : "Not yet expected"}
+                    {uploaded.length > 0
+                      ? `${uploaded.length} uploaded · ${formatRelativeFromNow(uploaded[0]!.createdAt)}`
+                      : expected
+                        ? "Expected"
+                        : "Not yet expected"}
                   </span>
                 </div>
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Badge variant="muted" className="text-[10px]">
-                  Not uploaded
+                  {uploaded.length > 0 ? "Uploaded" : "Not uploaded"}
                 </Badge>
                 {expected && (
                   <Button
@@ -856,24 +873,8 @@ function LoadDocumentsPanel({ load }: { load: FixtureLoad }) {
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  History timeline — derived from current status                            */
-/* -------------------------------------------------------------------------- */
-
-function HistoryTimeline({ load }: { load: FixtureLoad }) {
-  const loadIdx = STATUS_ORDER.indexOf(load.status);
-  // Build fictional prior transitions based on current status. Real data comes
-  // from load_status_history once server-wired.
-  const entries = STATUS_ORDER.slice(0, loadIdx + 1)
-    .map((s, i) => ({
-      status: s,
-      at: relativeStub(i, loadIdx),
-      who:
-        s === "accepted" || s.startsWith("en_route") ? "Driver" : "Gary Tavel",
-    }))
-    .reverse();
-
-  if (entries.length === 0) {
+function HistoryTimeline({ history }: { history: LoadHistoryEntry[] }) {
+  if (history.length === 0) {
     return (
       <EmptyCard
         icon={Clock}
@@ -886,9 +887,9 @@ function HistoryTimeline({ load }: { load: FixtureLoad }) {
   return (
     <Card className="gap-0 p-0">
       <ul className="relative flex flex-col gap-0">
-        {entries.map((e, i) => (
+        {history.map((e, i) => (
           <li
-            key={i}
+            key={e.id}
             className="relative flex items-start gap-4 px-4 py-4 sm:px-5"
           >
             <div className="relative flex flex-col items-center">
@@ -900,21 +901,28 @@ function HistoryTimeline({ load }: { load: FixtureLoad }) {
                     : "bg-[var(--border-strong)]")
                 }
               />
-              {i < entries.length - 1 && (
+              {i < history.length - 1 && (
                 <span className="absolute left-1/2 top-2 h-[calc(100%+1rem)] w-px -translate-x-1/2 bg-[var(--border)]" />
               )}
             </div>
             <div className="flex min-w-0 flex-1 flex-col gap-0.5">
               <div className="flex items-center gap-2">
-                <StatusPill kind="load" status={e.status} />
+                <StatusPill kind="load" status={e.toStatus} />
               </div>
               <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
                 <span className="flex items-center gap-1">
-                  <User className="size-3" /> {e.who}
+                  <User className="size-3" />
+                  {e.changedByUserId}
                 </span>
                 <span className="flex items-center gap-1">
-                  <Clock className="size-3" /> {e.at}
+                  <Clock className="size-3" />
+                  {formatRelativeFromNow(e.changedAt)}
                 </span>
+                {e.reason && (
+                  <span className="italic text-muted-foreground">
+                    {e.reason}
+                  </span>
+                )}
               </span>
             </div>
           </li>
@@ -923,29 +931,6 @@ function HistoryTimeline({ load }: { load: FixtureLoad }) {
     </Card>
   );
 }
-
-function relativeStub(i: number, total: number): string {
-  if (i === total) return "Just now";
-  const deltas = [
-    "Just now",
-    "15m ago",
-    "1h ago",
-    "3h ago",
-    "5h ago",
-    "Yesterday",
-    "2 days ago",
-    "3 days ago",
-    "4 days ago",
-    "5 days ago",
-    "6 days ago",
-  ];
-  const dist = total - i;
-  return deltas[Math.min(dist, deltas.length - 1)] ?? "Earlier";
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Primitives                                                                */
-/* -------------------------------------------------------------------------- */
 
 function Panel({
   icon: Icon,
@@ -1024,9 +1009,65 @@ function EmptyCard({
   );
 }
 
-/* -------------------------------------------------------------------------- */
-/*  Contextual primary action                                                 */
-/* -------------------------------------------------------------------------- */
+interface LoadDocSpec {
+  dbType: string;
+  label: string;
+  required: boolean;
+  expectedAtOrAfter: LoadStatus;
+}
+
+const LOAD_DOC_SPECS: LoadDocSpec[] = [
+  {
+    dbType: "load_rate_confirmation",
+    label: "Rate confirmation",
+    required: true,
+    expectedAtOrAfter: "assigned",
+  },
+  {
+    dbType: "load_bol",
+    label: "Bill of lading",
+    required: true,
+    expectedAtOrAfter: "at_pickup",
+  },
+  {
+    dbType: "load_pod",
+    label: "Proof of delivery",
+    required: true,
+    expectedAtOrAfter: "delivered",
+  },
+  {
+    dbType: "load_lumper_receipt",
+    label: "Lumper receipt",
+    required: false,
+    expectedAtOrAfter: "delivered",
+  },
+  {
+    dbType: "load_scale_ticket",
+    label: "Scale ticket",
+    required: false,
+    expectedAtOrAfter: "at_pickup",
+  },
+];
+
+const STATUS_ORDER: LoadStatus[] = [
+  "draft",
+  "assigned",
+  "accepted",
+  "en_route_pickup",
+  "at_pickup",
+  "loaded",
+  "en_route_delivery",
+  "at_delivery",
+  "delivered",
+  "pod_uploaded",
+  "completed",
+];
+
+function isExpectedNow(currentStatus: LoadStatus, spec: LoadDocSpec): boolean {
+  const cur = STATUS_ORDER.indexOf(currentStatus);
+  const exp = STATUS_ORDER.indexOf(spec.expectedAtOrAfter);
+  return cur >= exp;
+}
 
 interface PrimaryAction {
   label: string;

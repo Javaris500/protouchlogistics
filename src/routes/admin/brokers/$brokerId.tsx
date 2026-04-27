@@ -1,4 +1,5 @@
-import { Link, createFileRoute, notFound } from "@tanstack/react-router";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link, createFileRoute } from "@tanstack/react-router";
 import * as React from "react";
 import {
   AlertTriangle,
@@ -11,7 +12,6 @@ import {
   MoreHorizontal,
   Package,
   Pencil,
-  Phone,
   Receipt,
   Star,
   Trash2,
@@ -20,11 +20,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 
 import { toast } from "@/lib/toast";
+import { errorMessage } from "@/lib/errors";
 import { BackLink } from "@/components/common/BackLink";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { EntityChip } from "@/components/common/EntityChip";
 import { KeyStatStrip } from "@/components/common/KeyStatStrip";
 import { PageHeader } from "@/components/common/PageHeader";
+import { QueryBoundary } from "@/components/common/QueryBoundary";
+import { CardSkeleton } from "@/components/common/Skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -38,380 +41,463 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Separator } from "@/components/ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import type { BrokerGrade, FixtureBroker } from "@/lib/fixtures/brokers";
-import {
-  FIXTURE_BROKERS,
-  PAYMENT_TERMS_LABEL,
-  formatRatePerMile,
-  gradeTone,
-} from "@/lib/fixtures/brokers";
-import { FIXTURE_INVOICES } from "@/lib/fixtures/invoices";
-import { FIXTURE_LOADS } from "@/lib/fixtures/loads";
 import { formatMoneyCents } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  deleteBroker,
+  getBroker,
+  type BrokerGrade,
+} from "@/server/functions/brokers";
+
+const PAYMENT_TERMS_LABEL: Record<string, string> = {
+  net_15: "Net 15",
+  net_30: "Net 30",
+  net_45: "Net 45",
+  net_60: "Net 60",
+  quick_pay: "QuickPay",
+  other: "Other",
+};
+
+function gradeTone(
+  grade: BrokerGrade,
+): "success" | "primary" | "warning" | "muted" {
+  if (grade === "A") return "success";
+  if (grade === "B") return "primary";
+  if (grade === "C") return "warning";
+  return "muted";
+}
+
+function formatRatePerMile(cents: number): string {
+  if (cents === 0) return "—";
+  return `$${(cents / 100).toFixed(2)}/mi`;
+}
 
 export const Route = createFileRoute("/admin/brokers/$brokerId")({
-  loader: ({ params }) => {
-    const broker = FIXTURE_BROKERS.find((b) => b.id === params.brokerId);
-    if (!broker) throw notFound();
-    return { broker };
-  },
   component: BrokerDetailPage,
 });
 
 function BrokerDetailPage() {
-  const { broker } = Route.useLoaderData();
-  const recentLoads = FIXTURE_LOADS.filter(
-    (l) => l.broker.id === broker.id,
-  ).slice(0, 5);
-  const invoices = FIXTURE_INVOICES.filter((i) => i.broker.id === broker.id);
+  const { brokerId } = Route.useParams();
+  const queryClient = useQueryClient();
   const [archiveOpen, setArchiveOpen] = React.useState(false);
+
+  const brokerQuery = useQuery({
+    queryKey: ["admin", "broker", brokerId],
+    queryFn: () => getBroker({ data: { brokerId } }),
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: () => deleteBroker({ data: { brokerId } }),
+    onSuccess: () => {
+      toast.success("Broker archived");
+      queryClient.invalidateQueries({ queryKey: ["admin", "brokers"] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
 
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/brokers">Back to brokers</BackLink>
 
-      <section className="animate-enter stagger-1 flex flex-col gap-5">
-        {/* Identity hero — grade emblem + name + key meta */}
-        <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
-          <GradeEmblem grade={broker.grade} />
-          <div className="flex min-w-0 flex-1 flex-col gap-2">
-            <div className="flex flex-wrap items-center gap-3">
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-                {broker.companyName}
-              </h1>
-              <StarRating rating={broker.starRating} />
-            </div>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-              <span className="inline-flex items-center gap-1.5">
-                <Building2 className="size-3" /> MC{" "}
-                <span className="font-mono text-foreground">
-                  {broker.mcNumber}
-                </span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <Building2 className="size-3" /> DOT{" "}
-                <span className="font-mono text-foreground">
-                  {broker.dotNumber}
-                </span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <CreditCard className="size-3" />{" "}
-                {PAYMENT_TERMS_LABEL[broker.paymentTerms]}
-              </span>
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Button
-              variant="outline"
-              size="md"
-              onClick={() => toast.info("Edit broker — coming soon")}
-            >
-              <Pencil className="size-4" /> Edit
-            </Button>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="outline"
-                  size="icon"
-                  aria-label="More actions"
-                  className="rounded-md"
-                >
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuLabel>Broker actions</DropdownMenuLabel>
-                <DropdownMenuItem
-                  onSelect={() => toast.success("Credit check request sent")}
-                >
-                  <Mail /> Send credit check
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link to="/admin/invoices/new">
-                    <Receipt /> New invoice
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  variant="danger"
-                  onSelect={() => setArchiveOpen(true)}
-                >
-                  <Trash2 /> Archive broker
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-        </Card>
-
-        <KeyStatStrip
-          stats={[
-            {
-              label: "Avg days to pay",
-              value: `${broker.avgDaysToPay}d`,
-              sublabel: `${Math.round(broker.onTimeRate * 100)}% on-time`,
-              mono: true,
-              emphasis: true,
-            },
-            {
-              label: "Avg rate / mi",
-              value: formatRatePerMile(broker.avgRatePerMileCents),
-              sublabel: "last 90 days",
-              mono: true,
-            },
-            {
-              label: "Volume YTD",
-              value: broker.loadsYtd.toLocaleString(),
-              sublabel: formatMoneyCents(broker.revenueYtdCents),
-              mono: true,
-            },
-            {
-              label: "Detention",
-              value: `${broker.detention90d}`,
-              sublabel: "incidents · 90d",
-              mono: true,
-            },
-          ]}
-        />
-      </section>
-
-      <Tabs defaultValue="overview" className="animate-enter stagger-2">
-        <TabsList>
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
-          <TabsTrigger value="loads">
-            Loads
-            {recentLoads.length > 0 && (
-              <Badge variant="muted" className="ml-1 text-[10px]">
-                {recentLoads.length}+
-              </Badge>
-            )}
-          </TabsTrigger>
-          <TabsTrigger value="invoices">
-            Invoices
-            {invoices.length > 0 && (
-              <Badge variant="muted" className="ml-1 text-[10px]">
-                {invoices.length}
-              </Badge>
-            )}
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="overview" className="mt-4">
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Panel icon={Building2} title="Contact" className="lg:col-span-2">
-              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-                <Field label="Primary contact" value={broker.contactName} />
-                <Field label="Phone" value={broker.contactPhone} mono />
-                <Field label="Contact email" value={broker.contactEmail} />
-                <Field label="Billing email" value={broker.billingEmail} />
-              </dl>
-            </Panel>
-
-            <Panel icon={CreditCard} title="Terms">
-              <dl className="flex flex-col gap-3">
-                <Field
-                  label="Payment terms"
-                  value={PAYMENT_TERMS_LABEL[broker.paymentTerms]}
-                />
-                <Field
-                  label="Status"
-                  value={broker.status === "active" ? "Active" : "Archived"}
-                />
-                <Field
-                  label="Avg days to pay"
-                  value={`${broker.avgDaysToPay} days`}
-                  mono
-                />
-              </dl>
-            </Panel>
-
-            {recentLoads.length > 0 && (
-              <Panel
-                icon={Package}
-                title="Recent loads"
-                className="lg:col-span-3"
-                trailing={
-                  <Button asChild variant="ghost" size="sm">
-                    <Link to="/admin/loads">View all →</Link>
-                  </Button>
-                }
-              >
-                <ul className="flex flex-wrap gap-2">
-                  {recentLoads.map((l) => (
-                    <li key={l.id}>
-                      <EntityChip
-                        kind="load"
-                        id={l.id}
-                        label={l.loadNumber}
-                        sublabel={`${l.pickup.city} → ${l.delivery.city}`}
-                        mono
-                      />
-                    </li>
-                  ))}
-                </ul>
-              </Panel>
-            )}
-          </div>
-        </TabsContent>
-
-        <TabsContent value="scorecard" className="mt-4">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <ScorecardMetric
-              icon={Award}
-              label="Overall grade"
-              value={broker.grade}
-              sublabel={gradeReason(broker)}
-              isGradeCard
-            />
-            <ScorecardMetric
-              icon={Clock}
-              label="Avg days to pay"
-              value={`${broker.avgDaysToPay}d`}
-              sublabel={`Terms: ${PAYMENT_TERMS_LABEL[broker.paymentTerms]}`}
-            />
-            <ScorecardMetric
-              icon={DollarSign}
-              label="On-time payment rate"
-              value={`${Math.round(broker.onTimeRate * 100)}%`}
-              sublabel="last 12 months"
-            />
-            <ScorecardMetric
-              icon={TrendingUp}
-              label="Avg rate per mile"
-              value={formatRatePerMile(broker.avgRatePerMileCents)}
-              sublabel="last 90 days"
-            />
-            <ScorecardMetric
-              icon={Package}
-              label="Volume YTD"
-              value={broker.loadsYtd.toLocaleString()}
-              sublabel={`${formatMoneyCents(broker.revenueYtdCents)} revenue`}
-            />
-            <ScorecardMetric
-              icon={AlertTriangle}
-              label="Detention incidents"
-              value={broker.detention90d.toString()}
-              sublabel="≥2hr waits · last 90 days"
-              warning={broker.detention90d > 2}
-            />
-          </div>
-        </TabsContent>
-
-        <TabsContent value="loads" className="mt-4">
-          {recentLoads.length === 0 ? (
-            <EmptyCard
-              icon={Package}
-              title="No loads yet"
-              description={`Once you dispatch a load for ${broker.companyName}, it'll show up here.`}
-            />
-          ) : (
-            <Card className="gap-0 p-0">
-              <ul className="divide-y divide-border">
-                {recentLoads.map((l) => (
-                  <li
-                    key={l.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"
-                  >
-                    <div className="flex min-w-0 flex-col">
-                      <Link
-                        to="/admin/loads/$loadId"
-                        params={{ loadId: l.id }}
-                        className="font-mono text-sm font-semibold hover:text-[var(--primary)]"
-                      >
-                        {l.loadNumber}
-                      </Link>
-                      <span className="truncate text-[11px] text-muted-foreground">
-                        {l.pickup.city}, {l.pickup.state} → {l.delivery.city},{" "}
-                        {l.delivery.state}
-                      </span>
+      <QueryBoundary
+        query={brokerQuery}
+        skeleton={<CardSkeleton />}
+        errorTitle="Couldn't load broker"
+      >
+        {(detail) => {
+          const broker = detail.broker;
+          const recentLoads = detail.recentLoads;
+          const brokerInvoices = detail.invoices;
+          const scorecard = detail.scorecard;
+          return (
+            <>
+              <section className="animate-enter stagger-1 flex flex-col gap-5">
+                <Card className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
+                  <GradeEmblem grade={broker.grade} />
+                  <div className="flex min-w-0 flex-1 flex-col gap-2">
+                    <div className="flex flex-wrap items-center gap-3">
+                      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
+                        {broker.companyName}
+                      </h1>
+                      <StarRating rating={broker.starRating} />
                     </div>
-                    <div className="flex shrink-0 flex-col items-end gap-0.5">
-                      <span className="font-mono text-sm font-semibold tabular-nums">
-                        {formatMoneyCents(l.rateCents)}
-                      </span>
-                      {l.miles && (
-                        <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
-                          {l.miles.toLocaleString()} mi
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
+                      {broker.mcNumber && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Building2 className="size-3" /> MC{" "}
+                          <span className="font-mono text-foreground">
+                            {broker.mcNumber}
+                          </span>
                         </span>
                       )}
+                      {broker.dotNumber && (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Building2 className="size-3" /> DOT{" "}
+                          <span className="font-mono text-foreground">
+                            {broker.dotNumber}
+                          </span>
+                        </span>
+                      )}
+                      <span className="inline-flex items-center gap-1.5">
+                        <CreditCard className="size-3" />{" "}
+                        {PAYMENT_TERMS_LABEL[broker.paymentTerms] ??
+                          broker.paymentTerms}
+                      </span>
                     </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </TabsContent>
+                  </div>
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="md"
+                      onClick={() => toast.info("Edit broker — coming soon")}
+                    >
+                      <Pencil className="size-4" /> Edit
+                    </Button>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          aria-label="More actions"
+                          className="rounded-md"
+                        >
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuLabel>Broker actions</DropdownMenuLabel>
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            toast.success("Credit check request sent")
+                          }
+                        >
+                          <Mail /> Send credit check
+                        </DropdownMenuItem>
+                        <DropdownMenuItem asChild>
+                          <Link to="/admin/invoices/new">
+                            <Receipt /> New invoice
+                          </Link>
+                        </DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        <DropdownMenuItem
+                          variant="danger"
+                          onSelect={() => setArchiveOpen(true)}
+                        >
+                          <Trash2 /> Archive broker
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </Card>
 
-        <TabsContent value="invoices" className="mt-4">
-          {invoices.length === 0 ? (
-            <EmptyCard
-              icon={Receipt}
-              title="No invoices with this broker"
-              description="Generated invoices for this broker will appear here, grouped by payment status."
-              action={
-                <Button asChild variant="outline" size="sm">
-                  <Link to="/admin/invoices/new">
-                    <Receipt className="size-3.5" /> Create invoice
-                  </Link>
-                </Button>
-              }
-            />
-          ) : (
-            <Card className="gap-0 p-0">
-              <ul className="divide-y divide-border">
-                {invoices.map((inv) => (
-                  <li
-                    key={inv.id}
-                    className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"
-                  >
-                    <div className="flex min-w-0 flex-col">
-                      <Link
-                        to="/admin/invoices/$invoiceId"
-                        params={{ invoiceId: inv.id }}
-                        className="font-mono text-sm font-semibold hover:text-[var(--primary)]"
-                      >
-                        {inv.invoiceNumber}
-                      </Link>
-                      <span className="text-[11px] text-muted-foreground">
-                        {inv.loadCount} {inv.loadCount === 1 ? "load" : "loads"}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className="font-mono text-sm font-semibold tabular-nums">
-                        {formatMoneyCents(inv.totalCents)}
-                      </span>
-                      <Badge variant="muted" className="text-[10px]">
-                        {inv.status}
+                <KeyStatStrip
+                  stats={[
+                    {
+                      label: "Avg days to pay",
+                      value:
+                        scorecard.avgDaysToPay > 0
+                          ? `${scorecard.avgDaysToPay}d`
+                          : "—",
+                      sublabel:
+                        scorecard.onTimeRate > 0
+                          ? `${Math.round(scorecard.onTimeRate * 100)}% on-time`
+                          : "no payments yet",
+                      mono: true,
+                      emphasis: true,
+                    },
+                    {
+                      label: "Avg rate / mi",
+                      value: formatRatePerMile(scorecard.avgRatePerMileCents),
+                      sublabel: "last 90 days",
+                      mono: true,
+                    },
+                    {
+                      label: "Volume YTD",
+                      value: scorecard.loadsYtd.toLocaleString(),
+                      sublabel: formatMoneyCents(scorecard.revenueYtdCents),
+                      mono: true,
+                    },
+                    {
+                      label: "Detention",
+                      value: `${scorecard.detention90d}`,
+                      sublabel: "incidents · 90d",
+                      mono: true,
+                    },
+                  ]}
+                />
+              </section>
+
+              <Tabs
+                defaultValue="overview"
+                className="animate-enter stagger-2"
+              >
+                <TabsList>
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
+                  <TabsTrigger value="scorecard">Scorecard</TabsTrigger>
+                  <TabsTrigger value="loads">
+                    Loads
+                    {recentLoads.length > 0 && (
+                      <Badge variant="muted" className="ml-1 text-[10px]">
+                        {recentLoads.length}+
                       </Badge>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </TabsContent>
-      </Tabs>
+                    )}
+                  </TabsTrigger>
+                  <TabsTrigger value="invoices">
+                    Invoices
+                    {brokerInvoices.length > 0 && (
+                      <Badge variant="muted" className="ml-1 text-[10px]">
+                        {brokerInvoices.length}
+                      </Badge>
+                    )}
+                  </TabsTrigger>
+                </TabsList>
 
-      <ConfirmDialog
-        open={archiveOpen}
-        onOpenChange={setArchiveOpen}
-        tone="danger"
-        title={`Archive ${broker.companyName}?`}
-        description="New loads can't be assigned to archived brokers. Existing loads and invoices stay intact. You can un-archive from the brokers list later."
-        confirmLabel="Archive broker"
-        onConfirm={() => {
-          toast.success(`${broker.companyName} archived`);
-          setArchiveOpen(false);
+                <TabsContent value="overview" className="mt-4">
+                  <div className="grid gap-4 lg:grid-cols-3">
+                    <Panel
+                      icon={Building2}
+                      title="Contact"
+                      className="lg:col-span-2"
+                    >
+                      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+                        <Field
+                          label="Primary contact"
+                          value={broker.contactName}
+                        />
+                        <Field
+                          label="Phone"
+                          value={broker.contactPhone}
+                          mono
+                        />
+                        <Field
+                          label="Contact email"
+                          value={broker.contactEmail}
+                        />
+                        <Field
+                          label="Billing email"
+                          value={broker.billingEmail ?? "—"}
+                        />
+                      </dl>
+                    </Panel>
+
+                    <Panel icon={CreditCard} title="Terms">
+                      <dl className="flex flex-col gap-3">
+                        <Field
+                          label="Payment terms"
+                          value={
+                            PAYMENT_TERMS_LABEL[broker.paymentTerms] ??
+                            broker.paymentTerms
+                          }
+                        />
+                        <Field
+                          label="Status"
+                          value={broker.deletedAt ? "Archived" : "Active"}
+                        />
+                        <Field
+                          label="Avg days to pay"
+                          value={
+                            scorecard.avgDaysToPay > 0
+                              ? `${scorecard.avgDaysToPay} days`
+                              : "—"
+                          }
+                          mono
+                        />
+                      </dl>
+                    </Panel>
+
+                    {recentLoads.length > 0 && (
+                      <Panel
+                        icon={Package}
+                        title="Recent loads"
+                        className="lg:col-span-3"
+                        trailing={
+                          <Button asChild variant="ghost" size="sm">
+                            <Link to="/admin/loads">View all →</Link>
+                          </Button>
+                        }
+                      >
+                        <ul className="flex flex-wrap gap-2">
+                          {recentLoads.slice(0, 6).map((l) => (
+                            <li key={l.id}>
+                              <EntityChip
+                                kind="load"
+                                id={l.id}
+                                label={l.loadNumber}
+                                sublabel={l.commodity}
+                                mono
+                              />
+                            </li>
+                          ))}
+                        </ul>
+                      </Panel>
+                    )}
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="scorecard" className="mt-4">
+                  <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <ScorecardMetric
+                      icon={Award}
+                      label="Overall grade"
+                      value={broker.grade}
+                      sublabel={`${broker.starRating}/5 stars`}
+                      isGradeCard
+                    />
+                    <ScorecardMetric
+                      icon={Clock}
+                      label="Avg days to pay"
+                      value={
+                        scorecard.avgDaysToPay > 0
+                          ? `${scorecard.avgDaysToPay}d`
+                          : "—"
+                      }
+                      sublabel={`Terms: ${PAYMENT_TERMS_LABEL[broker.paymentTerms] ?? broker.paymentTerms}`}
+                    />
+                    <ScorecardMetric
+                      icon={DollarSign}
+                      label="On-time payment rate"
+                      value={
+                        scorecard.onTimeRate > 0
+                          ? `${Math.round(scorecard.onTimeRate * 100)}%`
+                          : "—"
+                      }
+                      sublabel="last 12 months"
+                    />
+                    <ScorecardMetric
+                      icon={TrendingUp}
+                      label="Avg rate per mile"
+                      value={formatRatePerMile(scorecard.avgRatePerMileCents)}
+                      sublabel="last 90 days"
+                    />
+                    <ScorecardMetric
+                      icon={Package}
+                      label="Volume YTD"
+                      value={scorecard.loadsYtd.toLocaleString()}
+                      sublabel={`${formatMoneyCents(scorecard.revenueYtdCents)} revenue`}
+                    />
+                    <ScorecardMetric
+                      icon={AlertTriangle}
+                      label="Detention incidents"
+                      value={scorecard.detention90d.toString()}
+                      sublabel="≥2hr waits · last 90 days"
+                      warning={scorecard.detention90d > 2}
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="loads" className="mt-4">
+                  {recentLoads.length === 0 ? (
+                    <EmptyCard
+                      icon={Package}
+                      title="No loads yet"
+                      description={`Once you dispatch a load for ${broker.companyName}, it'll show up here.`}
+                    />
+                  ) : (
+                    <Card className="gap-0 p-0">
+                      <ul className="divide-y divide-border">
+                        {recentLoads.map((l) => (
+                          <li
+                            key={l.id}
+                            className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"
+                          >
+                            <div className="flex min-w-0 flex-col">
+                              <Link
+                                to="/admin/loads/$loadId"
+                                params={{ loadId: l.id }}
+                                className="font-mono text-sm font-semibold hover:text-[var(--primary)]"
+                              >
+                                {l.loadNumber}
+                              </Link>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {l.commodity}
+                              </span>
+                            </div>
+                            <div className="flex shrink-0 flex-col items-end gap-0.5">
+                              <span className="font-mono text-sm font-semibold tabular-nums">
+                                {formatMoneyCents(l.rate)}
+                              </span>
+                              {l.miles && (
+                                <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+                                  {l.miles.toLocaleString()} mi
+                                </span>
+                              )}
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                </TabsContent>
+
+                <TabsContent value="invoices" className="mt-4">
+                  {brokerInvoices.length === 0 ? (
+                    <EmptyCard
+                      icon={Receipt}
+                      title="No invoices with this broker"
+                      description="Generated invoices for this broker will appear here, grouped by payment status."
+                      action={
+                        <Button asChild variant="outline" size="sm">
+                          <Link to="/admin/invoices/new">
+                            <Receipt className="size-3.5" /> Create invoice
+                          </Link>
+                        </Button>
+                      }
+                    />
+                  ) : (
+                    <Card className="gap-0 p-0">
+                      <ul className="divide-y divide-border">
+                        {brokerInvoices.map((inv) => (
+                          <li
+                            key={inv.id}
+                            className="flex items-center justify-between gap-3 px-4 py-3 sm:px-5"
+                          >
+                            <div className="flex min-w-0 flex-col">
+                              <Link
+                                to="/admin/invoices/$invoiceId"
+                                params={{ invoiceId: inv.id }}
+                                className="font-mono text-sm font-semibold hover:text-[var(--primary)]"
+                              >
+                                {inv.invoiceNumber}
+                              </Link>
+                              <span className="text-[11px] text-muted-foreground">
+                                {inv.issueDate}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-3">
+                              <span className="font-mono text-sm font-semibold tabular-nums">
+                                {formatMoneyCents(inv.totalCents)}
+                              </span>
+                              <Badge variant="muted" className="text-[10px]">
+                                {inv.status}
+                              </Badge>
+                            </div>
+                          </li>
+                        ))}
+                      </ul>
+                    </Card>
+                  )}
+                </TabsContent>
+              </Tabs>
+
+              <ConfirmDialog
+                open={archiveOpen}
+                onOpenChange={setArchiveOpen}
+                tone="danger"
+                title={`Archive ${broker.companyName}?`}
+                description="New loads can't be assigned to archived brokers. Existing loads and invoices stay intact. You can un-archive from the brokers list later."
+                confirmLabel="Archive broker"
+                onConfirm={() => {
+                  archiveMutation.mutate();
+                  setArchiveOpen(false);
+                }}
+              />
+            </>
+          );
         }}
-      />
+      </QueryBoundary>
     </div>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Grade emblem — report-card style                                          */
-/* -------------------------------------------------------------------------- */
 
 function GradeEmblem({ grade }: { grade: BrokerGrade }) {
   const tone = gradeTone(grade);
@@ -464,10 +550,6 @@ function StarRating({ rating }: { rating: number }) {
     </span>
   );
 }
-
-/* -------------------------------------------------------------------------- */
-/*  Scorecard metric                                                          */
-/* -------------------------------------------------------------------------- */
 
 function ScorecardMetric({
   icon: Icon,
@@ -526,20 +608,6 @@ function ScorecardMetric({
   );
 }
 
-function gradeReason(broker: FixtureBroker): string {
-  const bits: string[] = [];
-  if (broker.onTimeRate >= 0.9) bits.push("pays on time");
-  else if (broker.onTimeRate >= 0.75) bits.push("usually on time");
-  else bits.push("frequent late-pay");
-  if (broker.detention90d <= 1) bits.push("minimal detention");
-  else if (broker.detention90d > 3) bits.push("detention issues");
-  return bits.join(" · ");
-}
-
-/* -------------------------------------------------------------------------- */
-/*  Primitives                                                                */
-/* -------------------------------------------------------------------------- */
-
 function Panel({
   icon: Icon,
   title,
@@ -581,11 +649,7 @@ function Field({
       <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
         {label}
       </dt>
-      <dd
-        className={
-          mono ? "font-mono text-sm tabular-nums" : "text-sm break-all"
-        }
-      >
+      <dd className={mono ? "font-mono text-sm tabular-nums" : "text-sm"}>
         {value}
       </dd>
     </div>

@@ -3,6 +3,7 @@ import {
   and,
   desc,
   eq,
+  ilike,
   inArray,
   isNull,
   lte,
@@ -49,6 +50,7 @@ const PaginationZ = z.object({
 const ListDriversInput = PaginationZ.extend({
   status: DriverStatusZ.optional(),
   expiringWithinDays: z.number().int().min(0).max(365).optional(),
+  search: z.string().optional(),
 });
 
 export interface DriverListItem {
@@ -89,6 +91,20 @@ export const listDrivers = createServerFn({ method: "GET" })
         or(
           lte(driverProfiles.cdlExpiration, cutoffIso),
           lte(driverProfiles.medicalCardExpiration, cutoffIso),
+        )!,
+      );
+    }
+    if (data.search?.trim()) {
+      const q = `%${data.search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(users.email, q),
+          ilike(users.name, q),
+          ilike(driverProfiles.firstName, q),
+          ilike(driverProfiles.lastName, q),
+          ilike(driverProfiles.cdlNumber, q),
+          ilike(driverProfiles.phone, q),
+          ilike(driverProfiles.city, q),
         )!,
       );
     }
