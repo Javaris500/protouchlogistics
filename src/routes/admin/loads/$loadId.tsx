@@ -60,11 +60,33 @@ import {
 } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
+  assignLoad,
   cancelLoad as cancelLoadFn,
   getLoadAdmin,
+  updateLoad,
   updateLoadDriverPay,
   updateLoadStatus,
 } from "@/server/functions/loads";
+import { listDrivers } from "@/server/functions/drivers";
+import { createDocument } from "@/server/functions/documents";
+import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 type LoadDetail = Awaited<ReturnType<typeof getLoadAdmin>>;
 type LoadStop = LoadDetail["stops"][number];
@@ -117,6 +139,55 @@ function LoadDetailPage() {
     onError: (err) => toast.error(errorMessage(err)),
   });
 
+  const [uploadOpen, setUploadOpen] = React.useState(false);
+  const [uploadDefaultType, setUploadDefaultType] = React.useState<string>("");
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [pickerOpen, setPickerOpen] = React.useState(false);
+  const [pickedDriverId, setPickedDriverId] = React.useState<string>("");
+
+  const driversQuery = useQuery({
+    queryKey: ["admin", "drivers", "for-assignment"],
+    queryFn: () => listDrivers({ data: { status: "active" } }),
+    enabled: pickerOpen,
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (formData: FormData) => createDocument({ data: formData }),
+    onSuccess: () => {
+      toast.success("Document uploaded");
+      queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const updateLoadMutation = useMutation({
+    mutationFn: (patch: Record<string, unknown>) =>
+      updateLoad({ data: { loadId, patch: patch as never } }),
+    onSuccess: () => {
+      toast.success("Load updated");
+      queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+      setEditOpen(false);
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const assignDriverMutation = useMutation({
+    mutationFn: (driverProfileId: string) =>
+      assignLoad({ data: { loadId, driverProfileId } }),
+    onSuccess: () => {
+      toast.success("Driver assigned");
+      queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
+      setPickerOpen(false);
+      setPickedDriverId("");
+    },
+    onError: (err) => toast.error(errorMessage(err)),
+  });
+
+  const openUpload = (defaultType: string) => {
+    setUploadDefaultType(defaultType);
+    setUploadOpen(true);
+  };
+
   return (
     <div className="flex flex-col gap-5">
       <BackLink to="/admin/loads">Back to loads</BackLink>
@@ -132,12 +203,223 @@ function LoadDetailPage() {
             onPaySave={(cents) => updatePayMutation.mutate(cents)}
             onMarkComplete={() => updateStatusMutation.mutate("completed")}
             onCancel={(reason) => cancelMutation.mutate(reason)}
+            onOpenUpload={openUpload}
+            onOpenEdit={() => setEditOpen(true)}
+            onOpenAssignDriver={() => setPickerOpen(true)}
             payIsPending={updatePayMutation.isPending}
             statusIsPending={updateStatusMutation.isPending}
           />
         )}
       </QueryBoundary>
+
+      <UploadDocumentDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        ownerKind="load"
+        ownerId={loadId}
+        defaultType={uploadDefaultType}
+        onSubmit={async (fd) => {
+          await uploadMutation.mutateAsync(fd);
+        }}
+      />
+
+      <Dialog open={pickerOpen} onOpenChange={setPickerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign driver to load</DialogTitle>
+            <DialogDescription>
+              Pick an active driver. They'll see this load on their portal.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 pb-2">
+            <Select
+              value={pickedDriverId}
+              onValueChange={setPickedDriverId}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select a driver…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(driversQuery.data?.drivers ?? [])
+                  .filter((d): d is typeof d & { id: string } =>
+                    Boolean(d.id),
+                  )
+                  .map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.firstName ?? "—"} {d.lastName ?? ""} — {d.email}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost">Cancel</Button>
+            </DialogClose>
+            <Button
+              variant="primary"
+              disabled={!pickedDriverId || assignDriverMutation.isPending}
+              onClick={() => assignDriverMutation.mutate(pickedDriverId)}
+            >
+              {assignDriverMutation.isPending ? "Assigning…" : "Assign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {loadQuery.data && (
+        <EditLoadDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          load={loadQuery.data.load}
+          onSubmit={async (patch) => {
+            await updateLoadMutation.mutateAsync(patch);
+          }}
+          onPaySubmit={async (cents) => {
+            await updatePayMutation.mutateAsync(cents);
+          }}
+          isSubmitting={
+            updateLoadMutation.isPending || updatePayMutation.isPending
+          }
+        />
+      )}
     </div>
+  );
+}
+
+interface EditLoadDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  load: {
+    rate: number;
+    driverPayCents: number | null;
+    miles: number | null;
+    specialInstructions: string | null;
+    status: string;
+  };
+  onSubmit: (patch: Record<string, unknown>) => Promise<void>;
+  onPaySubmit: (cents: number) => Promise<void>;
+  isSubmitting: boolean;
+}
+
+function EditLoadDialog({
+  open,
+  onOpenChange,
+  load,
+  onSubmit,
+  onPaySubmit,
+  isSubmitting,
+}: EditLoadDialogProps) {
+  const [rate, setRate] = React.useState("");
+  const [pay, setPay] = React.useState("");
+  const [miles, setMiles] = React.useState("");
+  const [notes, setNotes] = React.useState("");
+
+  React.useEffect(() => {
+    if (open) {
+      setRate(load.rate != null ? String(load.rate / 100) : "");
+      setPay(
+        load.driverPayCents != null ? String(load.driverPayCents / 100) : "",
+      );
+      setMiles(load.miles != null ? String(load.miles) : "");
+      setNotes(load.specialInstructions ?? "");
+    }
+  }, [open, load]);
+
+  const completed = load.status === "completed";
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit load details</DialogTitle>
+          <DialogDescription>
+            Update rate, driver pay, miles, or special instructions.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 px-6 pb-2">
+          <div>
+            <label className="text-[12.5px] font-medium">Rate (USD)</label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={rate}
+              onChange={(e) => setRate(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-[12.5px] font-medium">
+              Driver pay (USD)
+            </label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={pay}
+              onChange={(e) => setPay(e.target.value)}
+              disabled={completed}
+            />
+            {completed && (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Pay is locked after the load completes.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className="text-[12.5px] font-medium">Miles</label>
+            <Input
+              type="number"
+              min="0"
+              value={miles}
+              onChange={(e) => setMiles(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="text-[12.5px] font-medium">
+              Special instructions
+            </label>
+            <Textarea
+              rows={3}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <DialogClose asChild>
+            <Button variant="ghost">Cancel</Button>
+          </DialogClose>
+          <Button
+            variant="primary"
+            disabled={isSubmitting}
+            onClick={async () => {
+              const patch: Record<string, unknown> = {};
+              const r = parseFloat(rate);
+              if (!Number.isNaN(r)) patch.rateCents = Math.round(r * 100);
+              if (miles === "") patch.miles = null;
+              else {
+                const m = parseInt(miles, 10);
+                if (!Number.isNaN(m)) patch.miles = m;
+              }
+              patch.specialInstructions = notes.trim() || null;
+
+              if (Object.keys(patch).length > 0) {
+                await onSubmit(patch);
+              }
+              if (!completed) {
+                const p = parseFloat(pay);
+                if (!Number.isNaN(p)) {
+                  await onPaySubmit(Math.round(p * 100));
+                }
+              }
+            }}
+          >
+            {isSubmitting ? "Saving…" : "Save changes"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -146,6 +428,9 @@ interface LoadDetailBodyProps {
   onPaySave: (cents: number | null) => void;
   onMarkComplete: () => void;
   onCancel: (reason: string) => void;
+  onOpenUpload: (defaultType: string) => void;
+  onOpenEdit: () => void;
+  onOpenAssignDriver: () => void;
   payIsPending: boolean;
   statusIsPending: boolean;
 }
@@ -155,6 +440,9 @@ function LoadDetailBody({
   onPaySave,
   onMarkComplete,
   onCancel,
+  onOpenUpload,
+  onOpenEdit,
+  onOpenAssignDriver,
   payIsPending,
   statusIsPending,
 }: LoadDetailBodyProps) {
@@ -202,11 +490,15 @@ function LoadDetailBody({
       onMarkComplete();
       return;
     }
-    if (primary.label === "Assign driver" && driverPayCents === null) {
-      setConfirmAssignOpen(true);
+    if (primary.label === "Assign driver") {
+      if (driverPayCents === null) {
+        setConfirmAssignOpen(true);
+        return;
+      }
+      onOpenAssignDriver();
       return;
     }
-    toast.info(`${primary.label} — coming soon`);
+    onOpenAssignDriver();
   };
 
   return (
@@ -265,12 +557,12 @@ function LoadDetailBody({
                 <DropdownMenuContent align="end" className="w-52">
                   <DropdownMenuLabel>Load actions</DropdownMenuLabel>
                   <DropdownMenuItem
-                    onSelect={() => toast.info("Edit load — coming soon")}
+                    onSelect={onOpenEdit}
                   >
                     <Pencil /> Edit details
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={() => toast.info("POD upload — coming soon")}
+                    onSelect={() => onOpenUpload("load_pod")}
                   >
                     <Upload /> Upload POD
                   </DropdownMenuItem>
@@ -443,6 +735,7 @@ function LoadDetailBody({
           <LoadDocumentsPanel
             loadStatus={status}
             documents={detail.documents}
+            onUpload={onOpenUpload}
           />
         </TabsContent>
 
@@ -478,7 +771,7 @@ function LoadDetailBody({
         onCancel={focusPayInput}
         onConfirm={() => {
           setConfirmAssignOpen(false);
-          toast.info("Driver picker — coming soon");
+          onOpenAssignDriver();
         }}
       />
 
@@ -799,9 +1092,11 @@ function StopCard({
 function LoadDocumentsPanel({
   loadStatus,
   documents,
+  onUpload,
 }: {
   loadStatus: LoadStatus;
   documents: LoadDocument[];
+  onUpload: (defaultType: string) => void;
 }) {
   // Build a quick-lookup of which spec types have been uploaded.
   const byType = new Map<string, LoadDocument[]>();
@@ -859,7 +1154,7 @@ function LoadDocumentsPanel({
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => toast.info("Document upload — coming soon")}
+                    onClick={() => onUpload(spec.dbType)}
                   >
                     <Upload className="size-3.5" /> Upload
                   </Button>
