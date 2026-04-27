@@ -1,15 +1,12 @@
 import * as React from "react";
 import { createFileRoute, Link, useRouter } from "@tanstack/react-router";
+import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { signInFn } from "@/server/auth/functions";
 
-/**
- * Bare /login scaffold — intentionally minimal.
- *
- * Per the Session-1 brief §3.4, this scaffold is locked: Sessions 2 and 3
- * cannot redesign it during this sprint. Phase 2 will re-skin it once the
- * auth flows are stable.
- */
 export const Route = createFileRoute("/login/")({
   component: LoginPage,
 });
@@ -18,10 +15,11 @@ function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = React.useState("");
   const [password, setPassword] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setError(null);
@@ -29,86 +27,190 @@ function LoginPage() {
 
     try {
       const user = await signInFn({ data: { email, password } });
-      if (user.role === "admin") {
-        await router.navigate({ to: "/admin/dashboard" });
-      } else {
-        await router.navigate({ to: "/onboarding" });
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Sign-in failed");
-    } finally {
+      const target =
+        user.role === "admin"
+          ? "/admin/dashboard"
+          : user.driverId
+            ? "/driver"
+            : "/onboarding";
+      window.location.href = target;
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Sign-in failed. Check your email and password.",
+      );
       setSubmitting(false);
     }
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        display: "grid",
-        placeItems: "center",
-        padding: "2rem",
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
-      <form
-        onSubmit={onSubmit}
-        style={{
-          width: "100%",
-          maxWidth: "320px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.75rem",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "1.25rem" }}>Sign in</h1>
-        <p style={{ margin: 0, fontSize: "0.65rem", color: "#64748b" }}>build:DEPLOY-MARKER-A1B2</p>
+    <div className="flex min-h-dvh bg-[var(--background)] text-[var(--foreground)]">
+      {/* LEFT BRAND PANEL — lg+ only */}
+      <aside className="relative hidden w-[42%] max-w-[600px] overflow-hidden bg-[var(--foreground)] text-[var(--background)] lg:flex lg:flex-col">
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -bottom-1/3 -left-1/4 size-[680px] rounded-full bg-[radial-gradient(circle,rgb(242_122_26_/_0.18),transparent_60%)] blur-2xl"
+        />
 
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ fontSize: "0.85rem" }}>Email</span>
-          <input
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
-          />
-        </label>
+        <div className="relative z-10 flex items-center gap-2.5 px-12 pt-12">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--primary)]">
+            <span className="font-mono text-[10px] font-bold tracking-wider text-[var(--primary-foreground)]">
+              PTL
+            </span>
+          </div>
+          <span className="text-[13.5px] font-semibold tracking-tight">
+            ProTouch Logistics
+          </span>
+        </div>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ fontSize: "0.85rem" }}>Password</span>
-          <input
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
-          />
-        </label>
+        <div className="relative z-10 flex flex-1 flex-col justify-end px-12 pb-12">
+          <figure className="max-w-md">
+            <blockquote className="text-[1.5rem] font-medium leading-[1.35] tracking-tight text-white">
+              "Built for the way dispatch actually runs — every load, every
+              driver, every doc, in one place."
+            </blockquote>
+            <figcaption className="mt-6 text-[12px] text-white/55">
+              Cockpit for fleet operations.
+            </figcaption>
+          </figure>
+        </div>
+      </aside>
 
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{ padding: "0.6rem", fontSize: "1rem", marginTop: "0.5rem", background: "#0f172a", color: "white", border: "none", borderRadius: "0.375rem", cursor: submitting ? "wait" : "pointer", fontWeight: 600 }}
-        >
-          {submitting ? "Signing in…" : "Sign in"}
-        </button>
+      {/* RIGHT FORM PANEL */}
+      <main className="flex flex-1 flex-col">
+        <header className="flex items-center justify-between px-6 py-6 lg:hidden">
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--foreground)]">
+              <span className="font-mono text-[10px] font-bold tracking-wider text-[var(--background)]">
+                PTL
+              </span>
+            </div>
+            <span className="text-[13.5px] font-semibold tracking-tight">
+              ProTouch Logistics
+            </span>
+          </div>
+        </header>
 
-        {error && (
-          <p role="alert" style={{ color: "#b91c1c", fontSize: "0.85rem", margin: 0 }}>
-            {error}
-          </p>
-        )}
+        <div className="flex flex-1 items-center justify-center px-6 pb-12 sm:px-10">
+          <div className="w-full max-w-[380px]">
+            <h1 className="text-[1.625rem] font-semibold leading-tight tracking-tight">
+              Sign in
+            </h1>
+            <p className="mt-2 text-[13.5px] leading-relaxed text-[var(--muted-foreground)]">
+              Enter your credentials to continue.
+            </p>
 
-        <p style={{ fontSize: "0.85rem", margin: "0.5rem 0 0", textAlign: "center" }}>
-          New driver?{" "}
-          <Link to="/signup" style={{ color: "#2563eb" }}>
-            Create an account
-          </Link>
-        </p>
-      </form>
+            <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-[12.5px] font-medium">
+                  Email
+                </Label>
+                <Input
+                  id="email"
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="you@protouchlogistics.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-11"
+                  required
+                  autoFocus
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="text-[12.5px] font-medium">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    name="password"
+                    type={showPassword ? "text" : "password"}
+                    autoComplete="current-password"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-11 pr-11"
+                    required
+                  />
+                  <button
+                    type="button"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-[var(--radius-md)] text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+                  >
+                    {showPassword ? (
+                      <EyeOff className="size-4" />
+                    ) : (
+                      <Eye className="size-4" />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3 py-2 text-[12.5px] text-[var(--danger)]"
+                >
+                  {error}
+                </div>
+              )}
+
+              <Button
+                type="submit"
+                size="lg"
+                disabled={submitting}
+                className="h-11 w-full text-[14px] font-semibold"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>Signing in…</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Sign in</span>
+                    <ArrowRight className="size-4" />
+                  </>
+                )}
+              </Button>
+            </form>
+
+            <p className="mt-8 text-[12.5px] text-[var(--muted-foreground)]">
+              New driver?{" "}
+              <Link
+                to="/signup"
+                className="font-medium text-[var(--foreground)] underline-offset-4 hover:underline"
+              >
+                Create an account
+              </Link>
+            </p>
+          </div>
+        </div>
+
+        <footer className="flex flex-col items-center justify-between gap-2 border-t border-[var(--border)] px-6 py-5 text-[11px] text-[var(--subtle-foreground)] sm:flex-row sm:px-10">
+          <span>© {new Date().getFullYear()} ProTouch Logistics, LLC.</span>
+          <div className="flex items-center gap-5">
+            <a href="#" className="transition-colors hover:text-[var(--foreground)]">
+              Terms
+            </a>
+            <a href="#" className="transition-colors hover:text-[var(--foreground)]">
+              Privacy
+            </a>
+            <a
+              href="mailto:support@protouchlogistics.com"
+              className="transition-colors hover:text-[var(--foreground)]"
+            >
+              Support
+            </a>
+          </div>
+        </footer>
+      </main>
     </div>
   );
 }
