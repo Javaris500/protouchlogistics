@@ -273,6 +273,12 @@ export const submitOnboardingProfileFn = createServerFn({
 
   const today = new Date().toISOString().slice(0, 10);
 
+  // Admins onboarding themselves as drivers (Gary's dual-role case) auto-approve:
+  // their users.status is already 'active' and they don't need to approve themselves
+  // from /admin/drivers/pending. Drivers signing up the normal way stay in the
+  // pending_approval queue.
+  const isAdminOnboardingSelf = sessionUser.role === "admin";
+
   return db.transaction(async (tx) => {
     const insertedProfile = await tx
       .insert(driverProfiles)
@@ -299,6 +305,8 @@ export const submitOnboardingProfileFn = createServerFn({
         hireDate: today,
         onboardingState: "complete",
         onboardingCompletedAt: new Date(),
+        approvedAt: isAdminOnboardingSelf ? new Date() : null,
+        approvedByUserId: isAdminOnboardingSelf ? sessionUser.id : null,
       })
       .returning({ id: driverProfiles.id });
     const profile = insertedProfile[0];

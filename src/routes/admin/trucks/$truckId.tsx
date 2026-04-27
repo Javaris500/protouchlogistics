@@ -42,11 +42,31 @@ import { errorMessage } from "@/lib/errors";
 import { daysUntil } from "@/lib/format";
 import { toast } from "@/lib/toast";
 import {
+  assignTruckToDriver,
   deleteTruck,
   getTruck,
   updateTruck,
 } from "@/server/functions/trucks";
 import { listLoadsAdmin } from "@/server/functions/loads";
+import { listDrivers } from "@/server/functions/drivers";
+import { createDocument } from "@/server/functions/documents";
+import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
+import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export const Route = createFileRoute("/admin/trucks/$truckId")({
   component: TruckDetailPage,
@@ -56,6 +76,36 @@ function TruckDetailPage() {
   const { truckId } = Route.useParams();
   const queryClient = useQueryClient();
   const [retireOpen, setRetireOpen] = React.useState(false);
+  const [uploadOpen, setUploadOpen] = React.useState(false);
+  const [assignDriverOpen, setAssignDriverOpen] = React.useState(false);
+  const [pickedDriverId, setPickedDriverId] = React.useState<string>("");
+
+  const driversQuery = useQuery({
+    queryKey: ["admin", "drivers", "for-assignment"],
+    queryFn: () => listDrivers({ data: { status: "active" } }),
+    enabled: assignDriverOpen,
+  });
+
+  const uploadMutation = useMutation({
+    mutationFn: (formData: FormData) => createDocument({ data: formData }),
+    onSuccess: () => {
+      toast.success("Document uploaded");
+      queryClient.invalidateQueries({ queryKey: ["admin", "truck", truckId] });
+    },
+  });
+
+  const assignDriverMutation = useMutation({
+    mutationFn: (driverProfileId: string) =>
+      assignTruckToDriver({ data: { truckId, driverProfileId } }),
+    onSuccess: () => {
+      toast.success("Driver assigned");
+      queryClient.invalidateQueries({ queryKey: ["admin", "truck", truckId] });
+      setAssignDriverOpen(false);
+      setPickedDriverId("");
+    },
+    onError: (err) =>
+      toast.error(err instanceof Error ? err.message : "Assign failed"),
+  });
 
   const truckQuery = useQuery({
     queryKey: ["admin", "truck", truckId],
@@ -121,9 +171,7 @@ function TruckDetailPage() {
                       <Button
                         variant={primary.variant}
                         size="md"
-                        onClick={() =>
-                          toast.info(`${primary.label} — coming soon`)
-                        }
+                        onClick={() => setAssignDriverOpen(true)}
                       >
                         <primary.icon className="size-4" />
                         {primary.label}
@@ -142,9 +190,7 @@ function TruckDetailPage() {
                         <DropdownMenuContent align="end" className="w-52">
                           <DropdownMenuLabel>Truck actions</DropdownMenuLabel>
                           <DropdownMenuItem
-                            onSelect={() =>
-                              toast.info("Assign driver — coming soon")
-                            }
+                            onSelect={() => setAssignDriverOpen(true)}
                           >
                             <UserPlus /> Assign driver
                           </DropdownMenuItem>
@@ -294,14 +340,17 @@ function TruckDetailPage() {
                       <DocRow
                         label="Registration"
                         date={truck.registrationExpiration}
+                        onUpload={() => setUploadOpen(true)}
                       />
                       <DocRow
                         label="Insurance"
                         date={truck.insuranceExpiration}
+                        onUpload={() => setUploadOpen(true)}
                       />
                       <DocRow
                         label="Annual inspection"
                         date={truck.annualInspectionExpiration}
+                        onUpload={() => setUploadOpen(true)}
                       />
                     </ul>
                   </Card>
@@ -366,6 +415,55 @@ function TruckDetailPage() {
           );
         }}
       </QueryBoundary>
+
+      <UploadDocumentDialog
+        open={uploadOpen}
+        onOpenChange={setUploadOpen}
+        ownerKind="truck"
+        ownerId={truckId}
+        onSubmit={async (fd) => {
+          await uploadMutation.mutateAsync(fd);
+        }}
+      />
+
+      <Dialog open={assignDriverOpen} onOpenChange={setAssignDriverOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Assign driver to truck</DialogTitle>
+            <DialogDescription>
+              Pick an active driver to pair with this unit.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="px-6 pb-2">
+            <Select value={pickedDriverId} onValueChange={setPickedDriverId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select a driver…" />
+              </SelectTrigger>
+              <SelectContent>
+                {(driversQuery.data?.drivers ?? [])
+                  .filter((d): d is typeof d & { id: string } => Boolean(d.id))
+                  .map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.firstName ?? "—"} {d.lastName ?? ""} — {d.email}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <DialogClose asChild>
+              <Button variant="ghost">Cancel</Button>
+            </DialogClose>
+            <Button
+              variant="primary"
+              disabled={!pickedDriverId || assignDriverMutation.isPending}
+              onClick={() => assignDriverMutation.mutate(pickedDriverId)}
+            >
+              {assignDriverMutation.isPending ? "Assigning…" : "Assign"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -402,7 +500,15 @@ function SpecStrip({
 /*  Doc row                                                                   */
 /* -------------------------------------------------------------------------- */
 
-function DocRow({ label, date }: { label: string; date: string }) {
+function DocRow({
+  label,
+  date,
+  onUpload,
+}: {
+  label: string;
+  date: string;
+  onUpload: () => void;
+}) {
   const days = daysUntil(date);
   const urgent = days <= 14;
   return (
@@ -427,11 +533,7 @@ function DocRow({ label, date }: { label: string; date: string }) {
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <ExpirationBadge date={date} />
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => toast.info("Document upload — coming soon")}
-        >
+        <Button variant="outline" size="sm" onClick={onUpload}>
           <Upload className="size-3.5" /> Replace
         </Button>
       </div>
