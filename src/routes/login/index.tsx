@@ -71,7 +71,7 @@ function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
+            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
           />
         </label>
 
@@ -83,14 +83,14 @@ function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
+            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
           />
         </label>
 
         <button
           type="submit"
           disabled={submitting}
-          style={{ padding: "0.6rem", fontSize: "1rem", marginTop: "0.5rem" }}
+          style={{ padding: "0.6rem", fontSize: "1rem", marginTop: "0.5rem", background: "#0f172a", color: "white", border: "none", borderRadius: "0.375rem", cursor: submitting ? "wait" : "pointer", fontWeight: 600 }}
         >
           {submitting ? "Signing in…" : "Sign in"}
         </button>

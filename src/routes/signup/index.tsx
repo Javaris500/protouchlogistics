@@ -84,7 +84,7 @@ function SignUpPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Optional — you can fill this in onboarding"
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
+            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
           />
         </label>
 
@@ -96,7 +96,7 @@ function SignUpPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
+            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
           />
         </label>
 
@@ -109,7 +109,7 @@ function SignUpPage() {
             onChange={(e) => setPassword(e.target.value)}
             required
             minLength={12}
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
+            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
           />
           <span style={{ fontSize: "0.75rem", color: "#64748b" }}>
             Minimum 12 characters.
@@ -125,14 +125,14 @@ function SignUpPage() {
             onChange={(e) => setConfirm(e.target.value)}
             required
             minLength={12}
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
+            style={{ padding: "0.5rem 0.75rem", fontSize: "1rem", border: "1px solid #cbd5e1", borderRadius: "0.375rem", outline: "none" }}
           />
         </label>
 
         <button
           type="submit"
           disabled={submitting}
-          style={{ padding: "0.6rem", fontSize: "1rem", marginTop: "0.5rem" }}
+          style={{ padding: "0.6rem", fontSize: "1rem", marginTop: "0.5rem", background: "#0f172a", color: "white", border: "none", borderRadius: "0.375rem", cursor: submitting ? "wait" : "pointer", fontWeight: 600 }}
         >
           {submitting ? "Creating account…" : "Create account"}
         </button>
