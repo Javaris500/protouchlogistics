@@ -96,8 +96,6 @@ One-to-one with `users` where role=driver.
 | medicalCardExpiration | date | |
 | hireDate | date | |
 | assignedTruckId | uuid FK trucks nullable | current default truck |
-| payModel | enum(`percent_of_rate`, `per_mile`, `flat_per_load`) | |
-| payRate | integer | cents; percent_of_rate stores basis points (2500 = 25.00%) |
 | notes | text nullable | admin-only |
 | onboardingState | text nullable | current parent step: "welcome", "about", "contact", "cdl", "medical", "review", "complete". Sub-screens within cdl/medical tracked client-side via URL `?sub=` param, not in DB. |
 | onboardingStartedAt | timestamptz nullable | |
@@ -108,10 +106,7 @@ One-to-one with `users` where role=driver.
 | deletedAt | timestamptz nullable | |
 | createdAt, updatedAt | timestamptz | |
 
-**Pay model semantics:**
-- `percent_of_rate`: `payRate` is basis points. Driver pay = `load.rate * payRate / 10000`.
-- `per_mile`: `payRate` is cents per mile. Driver pay = `load.miles * payRate`.
-- `flat_per_load`: `payRate` is cents. Driver pay = `payRate` per load, regardless of rate or miles.
+**Driver pay:** Pay is set per load via `loads.driverPayCents` (integer cents) — there is no per-driver default rate. Gary types the cents amount when assigning or editing a load, and `loads.driverPayUpdatedAt` records when it last changed. A load cannot transition to `completed` while `driverPayCents` is null. See `05-TECH-CONTRACTS.md §1` and `12-CONTRACTS-LOCK.md §1`.
 
 **Compliance gate:** A driver with `cdlExpiration` or `medicalCardExpiration` in the past cannot be assigned a new load. Enforced at the server function level in `assignLoadToDriver`.
 
@@ -426,16 +421,14 @@ Computed at load completion, stored for fast reporting.
 | id | uuid | PK |
 | driverProfileId | uuid FK driver_profiles | |
 | loadId | uuid FK loads unique | one pay record per load |
-| payModel | enum | snapshot at time of completion |
-| payRate | integer | snapshot |
-| calculatedAmountCents | bigint | |
-| adjustmentsCents | bigint | default 0 |
-| totalAmountCents | bigint | |
+| calculatedAmountCents | integer | snapshot of `loads.driverPayCents` at completion |
+| adjustmentsCents | integer | default 0 |
+| totalAmountCents | integer | calculated + adjustments |
 | paidAt | timestamptz nullable | set when Gary marks this record as paid out |
 | notes | text nullable | |
 | createdAt, updatedAt | timestamptz | |
 
-Snapshot the pay model at completion time so historical changes to the driver's pay setup don't retroactively alter past earnings. `paidAt` is used by the admin pay view to toggle settlement status (unpaid/paid) and by CSV export filtering.
+The amount snapshot is captured at completion so later edits to `loads.driverPayCents` (admin-only) do not retroactively shift past earnings. `paidAt` is used by the admin pay view to toggle settlement status (unpaid/paid) and by CSV export filtering.
 
 ### `settlement_statements`
 Weekly PDF settlement statements emailed to drivers every Friday.

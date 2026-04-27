@@ -776,7 +776,7 @@ Loader → drivers.getAdmin({driverId})
 
 Mutations:
   - drivers.updateAdmin({driverId, patch})
-    → if payModel or payRate change, DO NOT retroactively change past driver_pay_records (snapshots are immutable)
+    → driver pay is per-load now (loads.driverPayCents); past driver_pay_records snapshots stay immutable when a load's pay is edited
   - drivers.suspend / drivers.reactivate
   - pay.addAdjustment({payRecordId, amountCents, note})
   - pay.markPaid / pay.markUnpaid ({payRecordId})
