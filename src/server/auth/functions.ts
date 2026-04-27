@@ -157,18 +157,28 @@ const SignInInput = z.object({
 export const signInFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => SignInInput.parse(data))
   .handler(async ({ data }): Promise<SessionUser> => {
+    const t0 = Date.now();
+    const log = (step: string, extra?: Record<string, unknown>) => {
+      console.log(
+        JSON.stringify({ at: "signInFn", ms: Date.now() - t0, step, ...extra }),
+      );
+    };
+    log("enter");
     const email = data.email.trim().toLowerCase();
+    log("findUser:start", { email });
     const user = await db.query.users.findFirst({
       where: eq(users.email, email),
       columns: { id: true, email: true, role: true },
     });
+    log("findUser:done", { found: !!user });
     if (!user) {
-      // Constant-time-ish: still hash a throwaway so timing doesn't leak
-      // existence. The hash result is discarded.
+      log("hash-throwaway:start");
       await hashPassword(data.password).catch(() => undefined);
+      log("hash-throwaway:done");
       throw new AuthError("UNAUTHORIZED", "Invalid email or password");
     }
 
+    log("findAccount:start");
     const credAccount = await db.query.accounts.findFirst({
       where: and(
         eq(accounts.userId, user.id),
@@ -176,16 +186,21 @@ export const signInFn = createServerFn({ method: "POST" })
       ),
       columns: { password: true },
     });
+    log("findAccount:done", { hasPw: !!credAccount?.password });
     if (!credAccount?.password) {
       throw new AuthError("UNAUTHORIZED", "Invalid email or password");
     }
 
+    log("scrypt:start");
     const ok = await verifyPassword(credAccount.password, data.password);
+    log("scrypt:done", { ok });
     if (!ok) {
       throw new AuthError("UNAUTHORIZED", "Invalid email or password");
     }
 
+    log("session:start");
     await createSessionAndSetCookie(user.id);
+    log("session:done");
 
     // Driver profile lookup happens on the next request via getSessionFn;
     // /login redirect decision uses role only.
