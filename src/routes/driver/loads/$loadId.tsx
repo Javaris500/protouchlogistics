@@ -2,11 +2,12 @@ import { useState } from "react";
 import { createFileRoute, notFound, useRouter } from "@tanstack/react-router";
 import {
   ArrowRight,
+  Camera,
   CheckCircle2,
   FileText,
   MapPin,
+  Phone,
   Truck,
-  Upload,
 } from "lucide-react";
 
 import { BackLink } from "@/components/common/BackLink";
@@ -19,14 +20,17 @@ import { toast } from "@/lib/toast";
 import {
   formatDateTimeShort,
   formatMoneyCents,
+  formatPhone,
   formatRelativeFromNow,
 } from "@/lib/format";
+import { dialUrl, mapsUrl } from "@/lib/dispatch";
 import {
   getDriverLoadFn,
   updateDriverLoadStatusFn,
   uploadDriverLoadDocFn,
   type DriverLoadDetail,
   type DriverLoadStatus,
+  type DriverTransition,
 } from "@/server/functions/driver/loads";
 
 export const Route = createFileRoute("/driver/loads/$loadId")({
@@ -38,38 +42,34 @@ export const Route = createFileRoute("/driver/loads/$loadId")({
   component: DriverLoadDetailPage,
 });
 
-type Action = "accept" | "pickup" | "deliver";
-
-const ACCEPT_FROM: DriverLoadStatus[] = ["assigned"];
-const PICKUP_FROM: DriverLoadStatus[] = [
-  "accepted",
-  "en_route_pickup",
-  "at_pickup",
-];
-const DELIVER_FROM: DriverLoadStatus[] = [
-  "loaded",
-  "en_route_delivery",
-  "at_delivery",
-];
-
-function nextAction(status: DriverLoadStatus): {
-  action: Action;
-  label: string;
-} | null {
-  if (ACCEPT_FROM.includes(status)) return { action: "accept", label: "Accept load" };
-  if (PICKUP_FROM.includes(status)) return { action: "pickup", label: "Mark picked up" };
-  if (DELIVER_FROM.includes(status)) return { action: "deliver", label: "Mark delivered" };
-  return null;
-}
+const NEXT_ACTION: Record<
+  DriverLoadStatus,
+  { action: DriverTransition; label: string } | null
+> = {
+  draft: null,
+  assigned: { action: "accept", label: "Accept load" },
+  accepted: { action: "start_to_pickup", label: "Start drive to pickup" },
+  en_route_pickup: { action: "arrive_pickup", label: "I'm at pickup" },
+  at_pickup: { action: "load", label: "Loaded — leaving pickup" },
+  loaded: { action: "start_to_delivery", label: "Start drive to delivery" },
+  en_route_delivery: { action: "arrive_delivery", label: "I'm at delivery" },
+  at_delivery: { action: "deliver", label: "Mark delivered" },
+  delivered: null,
+  pod_uploaded: null,
+  completed: null,
+  cancelled: null,
+};
 
 function DriverLoadDetailPage() {
   const load = Route.useLoaderData();
   const router = useRouter();
-  const [busy, setBusy] = useState<Action | "bol" | "pod" | null>(null);
+  const [busy, setBusy] = useState<DriverTransition | "bol" | "pod" | null>(
+    null,
+  );
 
-  const action = nextAction(load.status);
+  const action = NEXT_ACTION[load.status];
 
-  async function transition(act: Action) {
+  async function transition(act: DriverTransition) {
     if (busy) return;
     setBusy(act);
     try {
@@ -167,18 +167,39 @@ function DriverLoadDetailPage() {
                     <p className="mt-1 truncate text-sm font-semibold">
                       {s.companyName ?? "—"}
                     </p>
-                    <p className="mt-0.5 flex items-center gap-1 text-xs text-[var(--muted-foreground)]">
+                    <a
+                      href={mapsUrl({
+                        addressLine1: s.addressLine1,
+                        city: s.city,
+                        state: s.state,
+                        zip: s.zip,
+                      })}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="mt-0.5 flex items-center gap-1 text-xs text-[var(--primary)] underline-offset-2 hover:underline"
+                    >
                       <MapPin className="size-3 shrink-0" aria-hidden />
                       {s.addressLine1}, {s.city}, {s.state} {s.zip}
-                    </p>
+                    </a>
                     <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
                       Window {formatDateTimeShort(s.windowStart)} →{" "}
                       {formatDateTimeShort(s.windowEnd)}
                     </p>
                     {s.contactName && (
-                      <p className="mt-1 text-[11px] text-[var(--muted-foreground)]">
+                      <p className="mt-1 flex flex-wrap items-center gap-x-1.5 text-[11px] text-[var(--muted-foreground)]">
                         Contact: {s.contactName}
-                        {s.contactPhone ? ` · ${s.contactPhone}` : ""}
+                        {s.contactPhone && (
+                          <>
+                            {" · "}
+                            <a
+                              href={dialUrl(s.contactPhone)}
+                              className="inline-flex items-center gap-1 text-[var(--primary)] underline-offset-2 hover:underline"
+                            >
+                              <Phone className="size-3 shrink-0" aria-hidden />
+                              {formatPhone(s.contactPhone)}
+                            </a>
+                          </>
+                        )}
                       </p>
                     )}
                     {s.notes && (
@@ -199,9 +220,9 @@ function DriverLoadDetailPage() {
         description={`${load.documents.length} on file`}
       >
         <div className="flex flex-col gap-4">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <UploadButton
-              label="Upload BOL"
+              label="BOL"
               loadId={load.id}
               type="load_bol"
               busy={busy === "bol"}
@@ -209,7 +230,7 @@ function DriverLoadDetailPage() {
               onDone={() => router.invalidate()}
             />
             <UploadButton
-              label="Upload POD"
+              label="POD"
               loadId={load.id}
               type="load_pod"
               busy={busy === "pod"}
@@ -320,26 +341,50 @@ function UploadButton({
   }
 
   return (
-    <label
-      className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md border border-[var(--border)] bg-[var(--background)] px-4 text-[13px] font-medium transition-colors hover:bg-muted/40 aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-      aria-disabled={busy}
-    >
-      <input
-        type="file"
-        accept="application/pdf,image/*"
-        className="hidden"
-        disabled={busy}
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) {
-            handleFile(file);
-            e.target.value = "";
-          }
-        }}
-      />
-      <Upload className="size-4" aria-hidden />
-      {busy ? "Uploading…" : label}
-    </label>
+    <div className="flex items-center gap-2">
+      <label
+        className="inline-flex h-10 cursor-pointer items-center gap-2 rounded-md bg-[var(--primary)] px-4 text-[13px] font-semibold text-[var(--primary-foreground)] transition-colors hover:bg-[var(--primary-hover)] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+        aria-disabled={busy}
+      >
+        <input
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              handleFile(file);
+              e.target.value = "";
+            }
+          }}
+        />
+        <Camera className="size-4" aria-hidden />
+        {busy ? "Uploading…" : `Photograph ${label}`}
+      </label>
+      <label
+        className="inline-flex h-10 cursor-pointer items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--background)] px-3 text-[12px] font-medium text-[var(--muted-foreground)] transition-colors hover:bg-muted/40 hover:text-[var(--foreground)] aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
+        aria-disabled={busy}
+        title="Pick a file (PDF or saved image)"
+      >
+        <input
+          type="file"
+          accept="application/pdf,image/*"
+          className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              handleFile(file);
+              e.target.value = "";
+            }
+          }}
+        />
+        <FileText className="size-3.5" aria-hidden />
+        File
+      </label>
+    </div>
   );
 }
 

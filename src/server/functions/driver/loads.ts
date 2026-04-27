@@ -290,24 +290,39 @@ export const getDriverLoadFn = createServerFn({ method: "GET" })
 
 /* ---------- Status transitions ---------- */
 
+export type DriverTransition =
+  | "accept"
+  | "start_to_pickup"
+  | "arrive_pickup"
+  | "load"
+  | "start_to_delivery"
+  | "arrive_delivery"
+  | "deliver";
+
 const TransitionInput = z.object({
   loadId: z.string().uuid(),
-  action: z.enum(["accept", "pickup", "deliver"]),
+  action: z.enum([
+    "accept",
+    "start_to_pickup",
+    "arrive_pickup",
+    "load",
+    "start_to_delivery",
+    "arrive_delivery",
+    "deliver",
+  ]),
 });
 
 const TRANSITION_RULES: Record<
-  "accept" | "pickup" | "deliver",
-  { from: DriverLoadStatus[]; to: DriverLoadStatus }
+  DriverTransition,
+  { from: DriverLoadStatus; to: DriverLoadStatus }
 > = {
-  accept: { from: ["assigned"], to: "accepted" },
-  pickup: {
-    from: ["accepted", "en_route_pickup", "at_pickup"],
-    to: "loaded",
-  },
-  deliver: {
-    from: ["loaded", "en_route_delivery", "at_delivery"],
-    to: "delivered",
-  },
+  accept: { from: "assigned", to: "accepted" },
+  start_to_pickup: { from: "accepted", to: "en_route_pickup" },
+  arrive_pickup: { from: "en_route_pickup", to: "at_pickup" },
+  load: { from: "at_pickup", to: "loaded" },
+  start_to_delivery: { from: "loaded", to: "en_route_delivery" },
+  arrive_delivery: { from: "en_route_delivery", to: "at_delivery" },
+  deliver: { from: "at_delivery", to: "delivered" },
 };
 
 export const updateDriverLoadStatusFn = createServerFn({ method: "POST" })
@@ -329,10 +344,38 @@ export const updateDriverLoadStatusFn = createServerFn({ method: "POST" })
         )
         .limit(1);
       if (!current) throw new Error("Load not found");
-      if (!rule.from.includes(current.status)) {
+      if (current.status !== rule.from) {
         throw new Error(
           `Cannot ${data.action} from status "${current.status}"`,
         );
+      }
+      // Mark arrival times on stops when transitioning into / out of dock states.
+      if (data.action === "arrive_pickup" || data.action === "arrive_delivery") {
+        const stopType =
+          data.action === "arrive_pickup" ? "pickup" : "delivery";
+        await tx
+          .update(loadStops)
+          .set({ arrivedAt: new Date() })
+          .where(
+            and(
+              eq(loadStops.loadId, data.loadId),
+              eq(loadStops.stopType, stopType),
+              isNull(loadStops.arrivedAt),
+            ),
+          );
+      }
+      if (data.action === "load" || data.action === "deliver") {
+        const stopType = data.action === "load" ? "pickup" : "delivery";
+        await tx
+          .update(loadStops)
+          .set({ departedAt: new Date() })
+          .where(
+            and(
+              eq(loadStops.loadId, data.loadId),
+              eq(loadStops.stopType, stopType),
+              isNull(loadStops.departedAt),
+            ),
+          );
       }
 
       await tx
