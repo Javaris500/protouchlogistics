@@ -1,10 +1,11 @@
-import { LogOut, Moon, Sun } from "lucide-react";
+import { LogOut, Moon, Phone, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useRouter } from "@tanstack/react-router";
 
 import { Button } from "@/components/ui/button";
 import { signOutFn } from "@/server/auth/functions";
 import { cn } from "@/lib/utils";
+import { DISPATCH_PHONE, dialUrl } from "@/lib/dispatch";
 
 type Theme = "light" | "dark";
 
@@ -70,6 +71,20 @@ export function DriverTopbar({ driverFirstName }: Props) {
         <span className="hidden text-[13px] font-medium text-[var(--muted-foreground)] sm:inline">
           Hey, <span className="text-[var(--foreground)]">{driverFirstName}</span>
         </span>
+
+        <a
+          href={dialUrl(DISPATCH_PHONE)}
+          aria-label="Call dispatch"
+          className={cn(
+            "inline-flex h-9 items-center gap-1.5 rounded-md bg-[color-mix(in_oklab,var(--primary)_14%,transparent)] px-3",
+            "text-[12px] font-semibold text-[var(--primary)]",
+            "transition-colors hover:bg-[color-mix(in_oklab,var(--primary)_22%,transparent)]",
+          )}
+        >
+          <Phone className="size-3.5" aria-hidden />
+          <span className="hidden sm:inline">Call dispatch</span>
+          <span className="sm:hidden">Dispatch</span>
+        </a>
 
         <Button
           type="button"
