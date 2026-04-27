@@ -1,6 +1,9 @@
 import * as React from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useRouter, useRouterState } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+
+import { getSessionFn, signOutFn } from "@/server/auth/functions";
 
 import {
   Sidebar,
@@ -358,6 +361,34 @@ function toneFg(tone: NavBadgeTone): string {
 }
 
 function UserCard({ collapsed }: { collapsed: boolean }) {
+  const router = useRouter();
+  const { data: user } = useQuery({
+    queryKey: ["session"],
+    queryFn: () => getSessionFn(),
+    staleTime: 30_000,
+  });
+
+  const initials = (() => {
+    const local = user?.email?.split("@")[0];
+    if (!local) return "•";
+    const computed = local
+      .split(/[._-]/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0]?.toUpperCase() ?? "")
+      .join("");
+    return computed || "•";
+  })();
+
+  const displayLabel = user?.email ?? "";
+  const roleLabel = user?.role ?? "";
+
+  async function handleSignOut() {
+    await signOutFn();
+    await router.invalidate();
+    router.navigate({ to: "/login" });
+  }
+
   return (
     <div
       className={cn(
@@ -376,39 +407,45 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
           "shadow-[0_1px_2px_rgba(0,0,0,0.3),inset_0_1px_0_rgba(255,255,255,0.15)]",
         )}
       >
-        GT
-        {/* Subtle online dot — quiet cue that the session is live. */}
-        <span
-          aria-hidden="true"
-          className={cn(
-            "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full",
-            "bg-[var(--success)]",
-            "ring-2 ring-[var(--sidebar)]",
-          )}
-        />
+        {initials}
+        {user && (
+          <span
+            aria-hidden="true"
+            className={cn(
+              "absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full",
+              "bg-[var(--success)]",
+              "ring-2 ring-[var(--sidebar)]",
+            )}
+          />
+        )}
       </div>
       {!collapsed && (
         <>
           <div className="flex min-w-0 flex-1 flex-col leading-none">
             <span className="truncate text-[13px] font-medium text-[var(--sidebar-foreground)]">
-              Gary Tavel
+              {displayLabel}
             </span>
-            <span className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--sidebar-muted)]">
-              Admin
-            </span>
-          </div>
-          <button
-            type="button"
-            aria-label="Sign out"
-            className={cn(
-              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
-              "text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-elevated)] hover:text-[var(--sidebar-foreground)]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
-              "transition-colors",
+            {roleLabel && (
+              <span className="mt-1 truncate text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--sidebar-muted)]">
+                {roleLabel}
+              </span>
             )}
-          >
-            <LogOut className="h-4 w-4" />
-          </button>
+          </div>
+          {user && (
+            <button
+              type="button"
+              aria-label="Sign out"
+              onClick={handleSignOut}
+              className={cn(
+                "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
+                "text-[var(--sidebar-muted)] hover:bg-[var(--sidebar-elevated)] hover:text-[var(--sidebar-foreground)]",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--ring)]",
+                "transition-colors",
+              )}
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
+          )}
         </>
       )}
     </div>
