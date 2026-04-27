@@ -99,9 +99,21 @@ async function loadSummariesFor(
   statuses: DriverLoadStatus[],
 ): Promise<DriverLoadSummary[]> {
   if (statuses.length === 0) return [];
+  // Pre-prod fix #7: physical column selection. Drivers must never see
+  // `loads.rate` (broker → admin amount) or `loads.brokerId` /
+  // `loads.createdByUserId`. Listing the safe columns here means even if a
+  // future contributor adds a sensitive field to the `loads` table, it
+  // won't get into server memory on driver-scoped queries — let alone the
+  // wire response. Per contract §6.1.
   const rows = await db
     .select({
-      load: loads,
+      id: loads.id,
+      loadNumber: loads.loadNumber,
+      status: loads.status,
+      commodity: loads.commodity,
+      miles: loads.miles,
+      driverPayCents: loads.driverPayCents,
+      updatedAt: loads.updatedAt,
       brokerName: brokers.companyName,
       truckUnit: trucks.unitNumber,
     })
@@ -119,7 +131,7 @@ async function loadSummariesFor(
 
   if (rows.length === 0) return [];
 
-  const loadIds = rows.map((r) => r.load.id);
+  const loadIds = rows.map((r) => r.id);
   const allStops = await db
     .select()
     .from(loadStops)
@@ -133,19 +145,19 @@ async function loadSummariesFor(
     stopsByLoad.set(s.loadId, arr);
   }
 
-  return rows.map(({ load, brokerName, truckUnit }) => {
-    const stops = stopsByLoad.get(load.id) ?? [];
+  return rows.map((r) => {
+    const stops = stopsByLoad.get(r.id) ?? [];
     const first = stops[0];
     const last = stops[stops.length - 1];
     return {
-      id: load.id,
-      loadNumber: load.loadNumber,
-      status: load.status,
-      brokerName: brokerName ?? "—",
-      commodity: load.commodity,
-      miles: load.miles,
-      driverPayCents: load.driverPayCents,
-      truckUnitNumber: truckUnit ?? null,
+      id: r.id,
+      loadNumber: r.loadNumber,
+      status: r.status,
+      brokerName: r.brokerName ?? "—",
+      commodity: r.commodity,
+      miles: r.miles,
+      driverPayCents: r.driverPayCents,
+      truckUnitNumber: r.truckUnit ?? null,
       firstStop: first
         ? {
             city: first.city,
@@ -160,7 +172,7 @@ async function loadSummariesFor(
             windowEnd: last.windowEnd.toISOString(),
           }
         : null,
-      updatedAt: load.updatedAt.toISOString(),
+      updatedAt: r.updatedAt.toISOString(),
     };
   });
 }
@@ -194,9 +206,21 @@ export const getDriverLoadFn = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<DriverLoadDetail | null> => {
     const { driverId } = await requireDriverContext();
 
+    // Pre-prod fix #7: explicit column projection. Drivers must never see
+    // loads.rate, loads.brokerId, loads.createdByUserId, etc. Per contract §6.1
+    // this is a physical safeguard, not runtime stripping.
     const row = await db
       .select({
-        load: loads,
+        id: loads.id,
+        loadNumber: loads.loadNumber,
+        status: loads.status,
+        commodity: loads.commodity,
+        miles: loads.miles,
+        driverPayCents: loads.driverPayCents,
+        specialInstructions: loads.specialInstructions,
+        referenceNumber: loads.referenceNumber,
+        bolNumber: loads.bolNumber,
+        updatedAt: loads.updatedAt,
         brokerName: brokers.companyName,
         truckUnit: trucks.unitNumber,
       })
@@ -214,18 +238,17 @@ export const getDriverLoadFn = createServerFn({ method: "GET" })
 
     const head = row[0];
     if (!head) return null;
-    const { load, brokerName, truckUnit } = head;
 
     const [stops, docs] = await Promise.all([
       db
         .select()
         .from(loadStops)
-        .where(eq(loadStops.loadId, load.id))
+        .where(eq(loadStops.loadId, head.id))
         .orderBy(asc(loadStops.sequence)),
       db
         .select()
         .from(documents)
-        .where(eq(documents.loadId, load.id))
+        .where(eq(documents.loadId, head.id))
         .orderBy(desc(documents.createdAt)),
     ]);
 
@@ -233,14 +256,14 @@ export const getDriverLoadFn = createServerFn({ method: "GET" })
     const lastStop = stops[stops.length - 1];
 
     return {
-      id: load.id,
-      loadNumber: load.loadNumber,
-      status: load.status,
-      brokerName: brokerName ?? "—",
-      commodity: load.commodity,
-      miles: load.miles,
-      driverPayCents: load.driverPayCents,
-      truckUnitNumber: truckUnit ?? null,
+      id: head.id,
+      loadNumber: head.loadNumber,
+      status: head.status,
+      brokerName: head.brokerName ?? "—",
+      commodity: head.commodity,
+      miles: head.miles,
+      driverPayCents: head.driverPayCents,
+      truckUnitNumber: head.truckUnit ?? null,
       firstStop: firstStop
         ? {
             city: firstStop.city,
@@ -255,7 +278,7 @@ export const getDriverLoadFn = createServerFn({ method: "GET" })
             windowEnd: lastStop.windowEnd.toISOString(),
           }
         : null,
-      updatedAt: load.updatedAt.toISOString(),
+      updatedAt: head.updatedAt.toISOString(),
       stops: stops.map((s) => ({
         id: s.id,
         sequence: s.sequence,
@@ -273,9 +296,9 @@ export const getDriverLoadFn = createServerFn({ method: "GET" })
         contactPhone: s.contactPhone,
         notes: s.notes,
       })),
-      specialInstructions: load.specialInstructions,
-      referenceNumber: load.referenceNumber,
-      bolNumber: load.bolNumber,
+      specialInstructions: head.specialInstructions,
+      referenceNumber: head.referenceNumber,
+      bolNumber: head.bolNumber,
       documents: docs.map((d) => ({
         id: d.id,
         type: d.type,

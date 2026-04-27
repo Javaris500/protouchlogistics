@@ -1,19 +1,25 @@
 /**
  * Driver-facing dispatch contact + deep-link helpers.
  *
- * The dispatch phone number is currently a build-time constant — Phase 2
- * should move it onto `company_settings` so Gary can edit without a
- * redeploy. For now, edit this file and ship.
+ * The dispatch phone is opt-in: there's no separate dispatcher role yet
+ * (Gary IS dispatch + admin + owner). Until a real number is wired in
+ * Phase 2 (likely on `company_settings` so it's editable without a
+ * redeploy), `DISPATCH_PHONE` stays null and the topbar button is hidden.
  */
 
-// TODO: replace with the real dispatch number before going to drivers.
-export const DISPATCH_PHONE = "+15555550100";
+/** Real dispatch number in E.164, or `null` if no dispatch role exists. */
+export const DISPATCH_PHONE: string | null = null;
+
+/** True if a real dispatch number is configured. UI gates the call button on this. */
+export function hasDispatch(): boolean {
+  return DISPATCH_PHONE !== null && DISPATCH_PHONE.length > 0;
+}
 
 /**
  * Pretty-print an E.164 number for display ("+15555550100" → "(555) 555-0100").
  * Falls back to the raw input on anything non-US.
  */
-export function formatDispatchPhone(e164: string = DISPATCH_PHONE): string {
+export function formatPhone(e164: string): string {
   const digits = e164.replace(/\D/g, "");
   if (digits.length === 11 && digits.startsWith("1")) {
     return `(${digits.slice(1, 4)}) ${digits.slice(4, 7)}-${digits.slice(7)}`;

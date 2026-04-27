@@ -11,13 +11,13 @@ Two tiers below. Tier 1 must be fixed before the first real driver touches the a
 
 | # | Item | Status |
 |---|---|---|
-| 1 | DISPATCH_PHONE placeholder | **OPEN — needs Gary's real number** |
+| 1 | DISPATCH_PHONE placeholder | ✓ FIXED — no separate dispatch role exists yet (Gary IS dispatch). `DISPATCH_PHONE` is now `null`, the topbar "Call dispatch" button is gated on `hasDispatch()` and hides until a real number lands. Phase 2: move onto `company_settings` so it's editable from the admin UI. |
 | 2 | Onboarding draft hydration race | ✓ FIXED — `HydrationGate` in `routes/onboarding.tsx` |
 | 3 | Submit-twice not guarded | ✓ FIXED — server-side idempotency check in `submitOnboardingProfileFn` returns the existing `driverProfileId` instead of erroring |
 | 4 | base64 photo upload (33% inflation) | ✓ FIXED — multipart `FormData` everywhere; no JSON inflation. `uploadOnboardingPhotoFn` and `uploadDriverLoadDocFn` now take raw files |
 | 5 | No rate limit on AI endpoints | OPEN — Tier 2 |
 | 6 | No GPS verification on arrive_pickup/delivery | OPEN — Tier 2 (Phase 2 if no detention pay) |
-| 7 | Driver-scoped queries fetch full `loads` row | OPEN — Tier 2 |
+| 7 | Driver-scoped queries fetch full `loads` row | ✓ FIXED — both `loadSummariesFor` and `getDriverLoadFn` now use explicit column projection (id, loadNumber, status, commodity, miles, driverPayCents, specialInstructions, referenceNumber, bolNumber, updatedAt + safe joins). `loads.rate`, `loads.brokerId`, `loads.createdByUserId` never enter server memory on driver queries — physical safeguard per contract §6.1. |
 | 8 | Orphan blob accumulation | OPEN — Tier 2 |
 | 9 | `users.status` flow not E2E verified | OPEN — needs manual smoke |
 | 10 | Session driverId stale after submit | OPEN — manual smoke |
