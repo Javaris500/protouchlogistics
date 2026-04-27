@@ -291,7 +291,7 @@ interface EditLoadDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   load: {
-    rate: number;
+    rateCents: number;
     driverPayCents: number | null;
     miles: number | null;
     specialInstructions: string | null;
@@ -317,7 +317,7 @@ function EditLoadDialog({
 
   React.useEffect(() => {
     if (open) {
-      setRate(load.rate != null ? String(load.rate / 100) : "");
+      setRate(load.rateCents != null ? String(load.rateCents / 100) : "");
       setPay(
         load.driverPayCents != null ? String(load.driverPayCents / 100) : "",
       );
