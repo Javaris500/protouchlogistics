@@ -31,8 +31,26 @@ export default async function handler(req, res) {
 
   const init = { method: req.method, headers };
   if (req.method !== "GET" && req.method !== "HEAD") {
-    init.body = Readable.toWeb(req);
-    init.duplex = "half";
+    // Buffer the body to a Uint8Array up-front instead of streaming via
+    // `Readable.toWeb(req)` + `duplex: 'half'`. The streaming form was
+    // hanging every POST server function for the full 300s function
+    // timeout on Vercel Fluid Compute (debugged 2026-04-27 — even a no-op
+    // POST never returned). Buffering is safe here because Vercel already
+    // caps request bodies at 4.5MB.
+    const chunks = [];
+    for await (const chunk of req) {
+      chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk);
+    }
+    if (chunks.length > 0) {
+      const buf = Buffer.concat(chunks);
+      // Use the underlying ArrayBuffer slice so Request gets a clean view
+      // (Buffer is a Uint8Array, but some runtimes are picky about pooled
+      // memory).
+      init.body = buf.buffer.slice(
+        buf.byteOffset,
+        buf.byteOffset + buf.byteLength,
+      );
+    }
   }
   const webRequest = new Request(url, init);
 
