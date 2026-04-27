@@ -1,12 +1,16 @@
 import * as React from "react";
-import { createFileRoute, useParams, useRouter } from "@tanstack/react-router";
+import {
+  createFileRoute,
+  useParams,
+  useRouter,
+} from "@tanstack/react-router";
+import { ArrowRight, Eye, EyeOff, Loader2 } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { acceptInviteFn } from "@/server/auth/functions";
 
-/**
- * Bare /accept-invite/$token scaffold — intentionally minimal. See the
- * note on /login. Phase 2 will polish.
- */
 export const Route = createFileRoute("/accept-invite/$token")({
   component: AcceptInvitePage,
 });
@@ -14,99 +18,166 @@ export const Route = createFileRoute("/accept-invite/$token")({
 function AcceptInvitePage() {
   const { token } = useParams({ from: "/accept-invite/$token" });
   const router = useRouter();
+  void router; // redirect uses window.location to refresh server context
   const [password, setPassword] = React.useState("");
   const [confirm, setConfirm] = React.useState("");
+  const [showPassword, setShowPassword] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [submitting, setSubmitting] = React.useState(false);
 
-  async function onSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
     setError(null);
 
     if (password.length < 12) {
-      setError("Password must be at least 12 characters");
+      setError("Password must be at least 12 characters.");
       return;
     }
     if (password !== confirm) {
-      setError("Passwords don't match");
+      setError("Passwords don't match.");
       return;
     }
 
     setSubmitting(true);
     try {
       await acceptInviteFn({ data: { token, password } });
-      await router.navigate({ to: "/onboarding" });
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Invite invalid or expired");
-    } finally {
+      window.location.href = "/onboarding";
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Invite invalid or expired.",
+      );
       setSubmitting(false);
     }
   }
 
   return (
-    <div
-      style={{
-        minHeight: "100dvh",
-        display: "grid",
-        placeItems: "center",
-        padding: "2rem",
-        fontFamily: "system-ui, sans-serif",
-      }}
-    >
-      <form
-        onSubmit={onSubmit}
-        style={{
-          width: "100%",
-          maxWidth: "360px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "0.75rem",
-        }}
-      >
-        <h1 style={{ margin: 0, fontSize: "1.25rem" }}>Set your password</h1>
-        <p style={{ margin: 0, fontSize: "0.85rem", color: "#525252" }}>
-          Choose a password to finish accepting your invite.
-        </p>
+    <div className="flex min-h-dvh flex-col bg-[var(--background)] text-[var(--foreground)]">
+      <header className="flex items-center px-6 py-6 sm:px-10">
+        <div className="flex items-center gap-2.5">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[var(--foreground)]">
+            <span className="font-mono text-[10px] font-bold tracking-wider text-[var(--background)]">
+              PTL
+            </span>
+          </div>
+          <span className="text-[13.5px] font-semibold tracking-tight">
+            ProTouch Logistics
+          </span>
+        </div>
+      </header>
 
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ fontSize: "0.85rem" }}>Password (min 12 chars)</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
-          />
-        </label>
-
-        <label style={{ display: "flex", flexDirection: "column", gap: "0.25rem" }}>
-          <span style={{ fontSize: "0.85rem" }}>Confirm password</span>
-          <input
-            type="password"
-            autoComplete="new-password"
-            value={confirm}
-            onChange={(e) => setConfirm(e.target.value)}
-            required
-            style={{ padding: "0.5rem", fontSize: "1rem" }}
-          />
-        </label>
-
-        <button
-          type="submit"
-          disabled={submitting}
-          style={{ padding: "0.6rem", fontSize: "1rem", marginTop: "0.5rem" }}
-        >
-          {submitting ? "Setting up…" : "Continue"}
-        </button>
-
-        {error && (
-          <p role="alert" style={{ color: "#b91c1c", fontSize: "0.85rem", margin: 0 }}>
-            {error}
+      <main className="flex flex-1 items-center justify-center px-6 pb-12">
+        <div className="w-full max-w-[380px]">
+          <h1 className="text-[1.625rem] font-semibold leading-tight tracking-tight">
+            Set your password
+          </h1>
+          <p className="mt-2 text-[13.5px] leading-relaxed text-[var(--muted-foreground)]">
+            Pick a password to finish accepting your invite. You'll go straight
+            into onboarding next.
           </p>
-        )}
-      </form>
+
+          <form onSubmit={handleSubmit} className="mt-8 space-y-5">
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-[12.5px] font-medium">
+                Password
+              </Label>
+              <div className="relative">
+                <Input
+                  id="password"
+                  name="password"
+                  type={showPassword ? "text" : "password"}
+                  autoComplete="new-password"
+                  placeholder="At least 12 characters"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="h-11 pr-11"
+                  required
+                  minLength={12}
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  onClick={() => setShowPassword((v) => !v)}
+                  className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-[var(--radius-md)] text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+                >
+                  {showPassword ? (
+                    <EyeOff className="size-4" />
+                  ) : (
+                    <Eye className="size-4" />
+                  )}
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="confirm" className="text-[12.5px] font-medium">
+                Confirm password
+              </Label>
+              <Input
+                id="confirm"
+                name="confirm"
+                type={showPassword ? "text" : "password"}
+                autoComplete="new-password"
+                placeholder="Re-enter your password"
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+                className="h-11"
+                required
+                minLength={12}
+              />
+            </div>
+
+            {error && (
+              <div
+                role="alert"
+                className="rounded-[var(--radius-md)] border border-[var(--danger)]/30 bg-[var(--danger)]/5 px-3 py-2 text-[12.5px] text-[var(--danger)]"
+              >
+                {error}
+              </div>
+            )}
+
+            <Button
+              type="submit"
+              size="lg"
+              disabled={submitting}
+              className="h-11 w-full text-[14px] font-semibold"
+            >
+              {submitting ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" />
+                  <span>Setting up…</span>
+                </>
+              ) : (
+                <>
+                  <span>Continue</span>
+                  <ArrowRight className="size-4" />
+                </>
+              )}
+            </Button>
+          </form>
+        </div>
+      </main>
+
+      <footer className="flex flex-col items-center justify-between gap-2 border-t border-[var(--border)] px-6 py-5 text-[11px] text-[var(--subtle-foreground)] sm:flex-row sm:px-10">
+        <span>© {new Date().getFullYear()} ProTouch Logistics, LLC.</span>
+        <div className="flex items-center gap-5">
+          <a href="#" className="transition-colors hover:text-[var(--foreground)]">
+            Terms
+          </a>
+          <a href="#" className="transition-colors hover:text-[var(--foreground)]">
+            Privacy
+          </a>
+          <a
+            href="mailto:support@protouchlogistics.com"
+            className="transition-colors hover:text-[var(--foreground)]"
+          >
+            Support
+          </a>
+        </div>
+      </footer>
     </div>
   );
 }
