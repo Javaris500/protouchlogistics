@@ -26,6 +26,11 @@ interface Props {
     photoKey: string,
     previewUrl: string,
     extracted: UploadOnboardingPhotoResult["extracted"],
+    fileMeta: {
+      fileName: string;
+      mimeType: string;
+      fileSizeBytes: number;
+    },
   ) => void;
   /** Existing preview to re-display when returning to the screen. */
   existingPreview?: string;
@@ -53,6 +58,7 @@ type CaptureState =
       key: string;
       fileName: string;
       fileSize: number;
+      mimeType: string;
     };
 
 const MAX_OCR_RETRIES = 2;
@@ -140,6 +146,12 @@ export function PhotoCapture({
           },
         });
 
+        const fileMeta = {
+          fileName: result.fileName,
+          mimeType: result.mimeType,
+          fileSizeBytes: result.fileSizeBytes,
+        };
+
         if (result.extracted) {
           setRetryCount(0);
           setState({
@@ -150,7 +162,7 @@ export function PhotoCapture({
             fileSize: file.size,
             extracted: result.extracted,
           });
-          onConfirm(result.blobKey, previewUrl, result.extracted);
+          onConfirm(result.blobKey, previewUrl, result.extracted, fileMeta);
           return;
         }
 
@@ -167,7 +179,7 @@ export function PhotoCapture({
             fileSize: file.size,
             extracted: null,
           });
-          onConfirm(result.blobKey, previewUrl, null);
+          onConfirm(result.blobKey, previewUrl, null, fileMeta);
           toast.info(
             "We saved the photo — please fill in the details by hand.",
           );
@@ -178,8 +190,9 @@ export function PhotoCapture({
           kind: "ocr_failed",
           previewUrl,
           key: result.blobKey,
-          fileName: file.name,
-          fileSize: file.size,
+          fileName: result.fileName,
+          fileSize: result.fileSizeBytes,
+          mimeType: result.mimeType,
         });
       } catch (err) {
         toast.error(
@@ -217,7 +230,11 @@ export function PhotoCapture({
       fileSize: state.fileSize,
       extracted: null,
     });
-    onConfirm(state.key, state.previewUrl, null);
+    onConfirm(state.key, state.previewUrl, null, {
+      fileName: state.fileName,
+      mimeType: state.mimeType,
+      fileSizeBytes: state.fileSize,
+    });
   };
 
   /* -------------------- CONFIRMED -------------------- */

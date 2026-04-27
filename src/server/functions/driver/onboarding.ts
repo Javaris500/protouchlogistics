@@ -1,26 +1,89 @@
 import { createServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 
 import { AuthError, requireDriver } from "@/server/auth/api";
 import { extractCdl, extractMedicalCard } from "@/server/ai";
+import { db } from "@/server/db";
+import {
+  documents,
+  driverProfiles,
+  onboardingDrafts,
+  users,
+} from "@/server/db/schema";
 import { uploadDoc } from "@/server/storage";
 import type { CdlExtraction, MedicalCardExtraction } from "@/server/ai";
 
 /**
- * Server functions for the onboarding flow's photo capture step.
- *
- * Onboarding context: the signed-in user has role='driver' but no
- * `driver_profiles` row yet — the profile is created by
- * `submitOnboardingProfile` at the end of the flow. So `requireDriver`
- * resolves SessionUser with driverId=null. We use the userId as the
- * temporary owner namespace in the blob path; the resulting blobKey is
- * recorded in the onboarding draft and re-attached to a `documents` row
- * once the driverProfile is created.
- *
- * Doing this avoids a schema change for a "draft profile" row while
- * keeping the blob path stable across submission (the URL doesn't move).
+ * Server-side onboarding state. The user is signed in (role='driver') but
+ * does not yet have a `driver_profiles` row — that's created at submission
+ * time. While the flow is in progress, partial state lives in
+ * `onboarding_drafts` (one row per user). Photos are uploaded to Vercel
+ * Blob immediately (so OCR can run), but their `documents` rows are
+ * deferred until submission too because of the polymorphic
+ * `documents_owner_exclusive` CHECK on the documents table.
  */
+
+/* ---------------------------------------------------------------- */
+/* Types                                                            */
+/* ---------------------------------------------------------------- */
+
+const FileMetaSchema = z.object({
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileSizeBytes: z.number().int().nonnegative(),
+});
+
+const AddressSchema = z.object({
+  line1: z.string().min(1),
+  city: z.string().min(1),
+  state: z.string().length(2),
+  zip: z.string().min(1),
+});
+
+const EmergencySchema = z.object({
+  name: z.string().min(1),
+  phone: z.string().min(1),
+  relation: z.string().min(1),
+});
+
+const OnboardingDataSchema = z
+  .object({
+    firstName: z.string().min(1),
+    lastName: z.string().min(1),
+    dob: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+    phone: z.string().min(1),
+    address: AddressSchema,
+    emergency: EmergencySchema,
+
+    cdlPhotoKey: z.string().optional(),
+    cdlFile: FileMetaSchema.optional(),
+    cdlNumber: z.string().min(1),
+    cdlClass: z.enum(["A", "B", "C"]),
+    cdlState: z.string().length(2),
+    cdlExpiration: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+
+    medicalPhotoKey: z.string().optional(),
+    medicalFile: FileMetaSchema.optional(),
+    medicalExpiration: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  })
+  .passthrough();
+
+/* ---------------------------------------------------------------- */
+/* Helpers                                                          */
+/* ---------------------------------------------------------------- */
+
+async function requireOnboardingUser() {
+  const req = getRequest();
+  if (!req) throw new AuthError("UNAUTHORIZED", "No request context");
+  const user = await requireDriver(req.headers);
+  return user;
+}
+
+/* ---------------------------------------------------------------- */
+/* Photo upload + OCR                                               */
+/* ---------------------------------------------------------------- */
 
 const UploadInput = z.object({
   docType: z.enum(["cdl", "medical"]),
@@ -32,35 +95,35 @@ const UploadInput = z.object({
 
 export interface UploadOnboardingPhotoResult {
   blobKey: string;
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: number;
   /** Extraction result, or null if OCR failed (caller falls back to manual form). */
   extracted: CdlExtraction | MedicalCardExtraction | null;
 }
 
 /**
  * Upload an onboarding photo (CDL or medical card) and run OCR against it.
- * Returns the blobKey (recorded on the onboarding draft) plus the OCR
- * extraction (or null on failure — caller renders manual form fields).
+ * Returns the blobKey + file metadata (which the client stores on the
+ * draft so submitOnboardingProfileFn can later create the documents row)
+ * plus the OCR extraction (or null on failure — caller renders manual
+ * form fields).
  *
- * The OCR helper internally retries up to 2× on transient errors. Caller
- * is responsible for capping user-driven re-uploads (the brief: 2 retries
- * before forcing the manual form).
+ * The OCR helper internally retries up to 2× on transient errors. The
+ * client caps user-driven re-uploads at 2 before forcing the manual form.
  */
 export const uploadOnboardingPhotoFn = createServerFn({ method: "POST" })
   .inputValidator((data: unknown) => UploadInput.parse(data))
   .handler(async ({ data }): Promise<UploadOnboardingPhotoResult> => {
-    const req = getRequest();
-    if (!req) throw new AuthError("UNAUTHORIZED", "No request context");
-    const sessionUser = await requireDriver(req.headers);
+    const sessionUser = await requireOnboardingUser();
 
     const buf = Buffer.from(data.contentBase64, "base64");
-
-    const docType =
-      data.docType === "cdl" ? "driver_cdl" : "driver_medical";
+    const docType = data.docType === "cdl" ? "driver_cdl" : "driver_medical";
 
     const { blobKey } = await uploadDoc({
       ownerKind: "driver",
       // Use userId as the namespace before the driverProfile exists; the
-      // blob URL is stable across the eventual document-row insertion.
+      // blob URL is stable across submitOnboardingProfileFn.
       ownerId: sessionUser.id,
       type: docType,
       file: buf,
@@ -73,5 +136,210 @@ export const uploadOnboardingPhotoFn = createServerFn({ method: "POST" })
         ? await extractCdl(blobKey)
         : await extractMedicalCard(blobKey);
 
-    return { blobKey, extracted };
+    return {
+      blobKey,
+      fileName: data.fileName,
+      mimeType: data.mimeType,
+      fileSizeBytes: buf.byteLength,
+      extracted,
+    };
   });
+
+/* ---------------------------------------------------------------- */
+/* Draft get / patch                                                */
+/* ---------------------------------------------------------------- */
+
+type FileMeta = {
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: number;
+};
+
+export interface OnboardingDraftData {
+  firstName?: string;
+  lastName?: string;
+  dob?: string;
+  phone?: string;
+  address?: { line1: string; city: string; state: string; zip: string };
+  emergency?: { name: string; phone: string; relation: string };
+  cdlPhotoKey?: string;
+  cdlFile?: FileMeta;
+  cdlNumber?: string;
+  cdlClass?: "A" | "B" | "C";
+  cdlState?: string;
+  cdlExpiration?: string;
+  medicalPhotoKey?: string;
+  medicalFile?: FileMeta;
+  medicalExpiration?: string;
+}
+
+/**
+ * Read the current onboarding draft for the signed-in user. Returns the
+ * stored `data` JSON or null if no draft row exists yet.
+ */
+export const getOnboardingDraftFn = createServerFn({ method: "GET" }).handler(
+  async (): Promise<OnboardingDraftData | null> => {
+    const sessionUser = await requireOnboardingUser();
+
+    const row = await db.query.onboardingDrafts.findFirst({
+      where: eq(onboardingDrafts.userId, sessionUser.id),
+    });
+    return (row?.data as OnboardingDraftData | undefined) ?? null;
+  },
+);
+
+const PatchInput = z.object({
+  /** Partial OnboardingData. Server merges with whatever is currently stored. */
+  patch: z.record(z.string(), z.unknown()),
+});
+
+/**
+ * Merge `patch` into the user's onboarding draft. Upserts the row if it
+ * doesn't exist yet. Always merges shallowly — nested objects (`address`,
+ * `emergency`, file metadata) are replaced wholesale by the patch, not
+ * deep-merged. Caller passes the full sub-object when changing one field.
+ */
+export const patchOnboardingDraftFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => PatchInput.parse(data))
+  .handler(async ({ data }) => {
+    const sessionUser = await requireOnboardingUser();
+
+    const existing = await db.query.onboardingDrafts.findFirst({
+      where: eq(onboardingDrafts.userId, sessionUser.id),
+    });
+
+    const merged = {
+      ...((existing?.data as Record<string, unknown>) ?? {}),
+      ...data.patch,
+    };
+
+    await db
+      .insert(onboardingDrafts)
+      .values({ userId: sessionUser.id, data: merged })
+      .onConflictDoUpdate({
+        target: onboardingDrafts.userId,
+        set: { data: merged, updatedAt: new Date() },
+      });
+
+    return { ok: true as const };
+  });
+
+/* ---------------------------------------------------------------- */
+/* Submit                                                           */
+/* ---------------------------------------------------------------- */
+
+export interface SubmitOnboardingProfileResult {
+  driverProfileId: string;
+}
+
+/**
+ * Final step of onboarding. Reads the draft, validates it has every
+ * NOT-NULL field driver_profiles requires, creates the driver_profiles
+ * row, creates documents rows for any uploaded blobs (CDL + medical),
+ * updates users.name to `firstName lastName` (per contract §1.x), then
+ * deletes the draft.
+ *
+ * Throws if the draft is missing required fields — the review screen
+ * gates on UI completeness but the server still validates.
+ */
+export const submitOnboardingProfileFn = createServerFn({
+  method: "POST",
+}).handler(async (): Promise<SubmitOnboardingProfileResult> => {
+  const sessionUser = await requireOnboardingUser();
+
+  const draftRow = await db.query.onboardingDrafts.findFirst({
+    where: eq(onboardingDrafts.userId, sessionUser.id),
+  });
+  if (!draftRow) {
+    throw new Error("No onboarding draft to submit");
+  }
+
+  const parsed = OnboardingDataSchema.safeParse(draftRow.data);
+  if (!parsed.success) {
+    throw new Error(
+      `Onboarding draft incomplete: ${parsed.error.issues
+        .map((i) => i.path.join(".") || "(root)")
+        .join(", ")}`,
+    );
+  }
+  const draft = parsed.data;
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  return db.transaction(async (tx) => {
+    const insertedProfile = await tx
+      .insert(driverProfiles)
+      .values({
+        userId: sessionUser.id,
+        firstName: draft.firstName,
+        lastName: draft.lastName,
+        dob: draft.dob,
+        phone: draft.phone,
+        addressLine1: draft.address.line1,
+        city: draft.address.city,
+        state: draft.address.state,
+        zip: draft.address.zip,
+        emergencyContactName: draft.emergency.name,
+        emergencyContactPhone: draft.emergency.phone,
+        emergencyContactRelation: draft.emergency.relation,
+        cdlNumber: draft.cdlNumber,
+        cdlClass: draft.cdlClass,
+        cdlState: draft.cdlState,
+        cdlExpiration: draft.cdlExpiration,
+        medicalCardExpiration: draft.medicalExpiration,
+        // hireDate is admin-set at approval time, but the column is NOT NULL.
+        // Default to submission date — admin can edit later.
+        hireDate: today,
+        onboardingState: "complete",
+        onboardingCompletedAt: new Date(),
+      })
+      .returning({ id: driverProfiles.id });
+    const profile = insertedProfile[0];
+    if (!profile) throw new Error("driver_profiles insert failed");
+
+    const docRows: Array<typeof documents.$inferInsert> = [];
+    if (draft.cdlPhotoKey && draft.cdlFile) {
+      docRows.push({
+        type: "driver_cdl",
+        blobKey: draft.cdlPhotoKey,
+        fileName: draft.cdlFile.fileName,
+        fileSizeBytes: draft.cdlFile.fileSizeBytes,
+        mimeType: draft.cdlFile.mimeType,
+        uploadedByUserId: sessionUser.id,
+        driverProfileId: profile.id,
+        expirationDate: draft.cdlExpiration,
+      });
+    }
+    if (draft.medicalPhotoKey && draft.medicalFile) {
+      docRows.push({
+        type: "driver_medical",
+        blobKey: draft.medicalPhotoKey,
+        fileName: draft.medicalFile.fileName,
+        fileSizeBytes: draft.medicalFile.fileSizeBytes,
+        mimeType: draft.medicalFile.mimeType,
+        uploadedByUserId: sessionUser.id,
+        driverProfileId: profile.id,
+        expirationDate: draft.medicalExpiration,
+      });
+    }
+    if (docRows.length > 0) {
+      await tx.insert(documents).values(docRows);
+    }
+
+    // Contract §1.x: populate users.name with the real legal name once
+    // the about-step (and now the full submission) is in.
+    await tx
+      .update(users)
+      .set({
+        name: `${draft.firstName} ${draft.lastName}`.trim(),
+        updatedAt: new Date(),
+      })
+      .where(eq(users.id, sessionUser.id));
+
+    await tx
+      .delete(onboardingDrafts)
+      .where(eq(onboardingDrafts.userId, sessionUser.id));
+
+    return { driverProfileId: profile.id };
+  });
+});

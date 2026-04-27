@@ -34,11 +34,17 @@ function MedicalStep() {
     key: string,
     preview: string,
     extracted: unknown,
+    fileMeta: {
+      fileName: string;
+      mimeType: string;
+      fileSizeBytes: number;
+    },
   ) => {
     setPreviewUrl(preview);
     const med = extracted as { expiration: string } | null;
     update({
       medicalPhotoKey: key,
+      medicalFile: fileMeta,
       ...(med ? { medicalExpiration: med.expiration } : {}),
     });
     navigate({ to: "/onboarding/medical", search: { sub: "details" } });

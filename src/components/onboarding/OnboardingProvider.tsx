@@ -1,9 +1,16 @@
 import * as React from "react";
 
+import {
+  getOnboardingDraftFn,
+  patchOnboardingDraftFn,
+  submitOnboardingProfileFn,
+} from "@/server/functions/driver/onboarding";
+
 /**
- * Shape of the onboarding draft. Phase 1 lives in sessionStorage only —
- * swap the persistence layer for a `saveOnboardingStep` server function
- * once Better Auth + TanStack Start are wired.
+ * Shape of the onboarding draft. Persisted server-side in
+ * `onboarding_drafts` (one row per user) so the user can resume on any
+ * device. Mutations are debounced (~500ms) so rapid typing doesn't fan
+ * out into a request per keystroke.
  */
 export type OnboardingData = {
   // Step 1: About you
@@ -27,6 +34,7 @@ export type OnboardingData = {
 
   // Step 3: CDL
   cdlPhotoKey?: string;
+  cdlFile?: { fileName: string; mimeType: string; fileSizeBytes: number };
   cdlNumber?: string;
   cdlClass?: "A" | "B" | "C";
   cdlState?: string;
@@ -34,12 +42,17 @@ export type OnboardingData = {
 
   // Step 4: Medical card
   medicalPhotoKey?: string;
+  medicalFile?: { fileName: string; mimeType: string; fileSizeBytes: number };
   medicalExpiration?: string;
 };
 
 interface OnboardingCtx {
   data: OnboardingData;
+  /** True until the initial draft fetch resolves. */
+  hydrated: boolean;
   update: (patch: Partial<OnboardingData>) => void;
+  /** Submit the final profile. Resolves with the new driverProfileId on success. */
+  submit: () => Promise<{ driverProfileId: string }>;
   reset: () => void;
   /** Total AI helper calls used in this session — cost guardrail per contract §4. */
   aiCallsCount: number;
@@ -48,51 +61,90 @@ interface OnboardingCtx {
 
 const Context = React.createContext<OnboardingCtx | null>(null);
 
-const STORAGE_KEY = "ptl-onboarding-draft";
 const AI_CALL_WARN_THRESHOLD = 4;
-
-function loadDraft(): OnboardingData {
-  if (typeof window === "undefined") return {};
-  try {
-    const raw = window.sessionStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as OnboardingData) : {};
-  } catch {
-    return {};
-  }
-}
-
-function persist(data: OnboardingData) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  } catch {
-    // Quota exceeded or Safari private mode — non-fatal.
-  }
-}
+const PATCH_DEBOUNCE_MS = 500;
 
 export function OnboardingProvider({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const [data, setData] = React.useState<OnboardingData>(() => loadDraft());
+  const [data, setData] = React.useState<OnboardingData>({});
+  const [hydrated, setHydrated] = React.useState(false);
   const [aiCallsCount, setAiCallsCount] = React.useState(0);
 
-  const update = React.useCallback((patch: Partial<OnboardingData>) => {
-    setData((prev) => {
-      const next = { ...prev, ...patch };
-      persist(next);
-      return next;
+  // Patches that have been applied to local state but not yet flushed to
+  // the server. Debounce the round-trip so typing into a phone field
+  // doesn't fire 10 requests.
+  const pendingPatchRef = React.useRef<Partial<OnboardingData>>({});
+  const flushTimerRef = React.useRef<number | null>(null);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    getOnboardingDraftFn()
+      .then((draft) => {
+        if (cancelled) return;
+        if (draft) setData(draft as OnboardingData);
+        setHydrated(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const flush = React.useCallback(() => {
+    const patch = pendingPatchRef.current;
+    pendingPatchRef.current = {};
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    if (Object.keys(patch).length === 0) return;
+    void patchOnboardingDraftFn({
+      data: { patch: patch as Record<string, unknown> },
+    }).catch((err) => {
+      // Non-fatal — local state is still correct, the server will catch
+      // up on the next flush. Log so we notice persistent failures.
+      // eslint-disable-next-line no-console
+      console.warn("[onboarding] patch failed", err);
     });
   }, []);
+
+  const update = React.useCallback(
+    (patch: Partial<OnboardingData>) => {
+      setData((prev) => ({ ...prev, ...patch }));
+      pendingPatchRef.current = {
+        ...pendingPatchRef.current,
+        ...patch,
+      };
+      if (flushTimerRef.current !== null) {
+        window.clearTimeout(flushTimerRef.current);
+      }
+      flushTimerRef.current = window.setTimeout(flush, PATCH_DEBOUNCE_MS);
+    },
+    [flush],
+  );
 
   const reset = React.useCallback(() => {
     setData({});
     setAiCallsCount(0);
-    if (typeof window !== "undefined") {
-      window.sessionStorage.removeItem(STORAGE_KEY);
+    pendingPatchRef.current = {};
+    if (flushTimerRef.current !== null) {
+      window.clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
     }
   }, []);
+
+  const submit = React.useCallback(async () => {
+    flush();
+    // Give the in-flight patch a beat to land before submit reads the row.
+    await new Promise((r) => setTimeout(r, 50));
+    return submitOnboardingProfileFn();
+  }, [flush]);
 
   const recordAiCall = React.useCallback(() => {
     setAiCallsCount((n) => {
@@ -107,9 +159,26 @@ export function OnboardingProvider({
     });
   }, []);
 
+  // Best-effort flush on unmount so navigating away with a pending patch
+  // still persists. (The Promise from a fire-and-forget RPC will continue
+  // even after this component unmounts.)
+  React.useEffect(() => {
+    return () => {
+      flush();
+    };
+  }, [flush]);
+
   const value = React.useMemo(
-    () => ({ data, update, reset, aiCallsCount, recordAiCall }),
-    [data, update, reset, aiCallsCount, recordAiCall],
+    () => ({
+      data,
+      hydrated,
+      update,
+      submit,
+      reset,
+      aiCallsCount,
+      recordAiCall,
+    }),
+    [data, hydrated, update, submit, reset, aiCallsCount, recordAiCall],
   );
 
   return <Context.Provider value={value}>{children}</Context.Provider>;

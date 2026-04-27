@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Section } from "@/components/common/Section";
 import { Card } from "@/components/ui/card";
-import { DRIVER_EMPTY_COPY } from "@/components/driver/driver-empty-copy";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { formatDateShort, formatMoneyCents } from "@/lib/format";
 import { listDriverPayWeeksFn } from "@/server/functions/driver/pay";
 
@@ -18,7 +18,7 @@ function DriverPayPage() {
   const weeks = Route.useLoaderData();
 
   if (weeks.length === 0) {
-    const copy = DRIVER_EMPTY_COPY["driver.pay.pending"];
+    const copy = EMPTY_COPY["driver.pay.pending"];
     return (
       <div className="flex flex-col gap-6">
         <PageHeader

@@ -6,7 +6,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { Section } from "@/components/common/Section";
 import { Button } from "@/components/ui/button";
 import { LoadCard } from "@/components/driver/LoadCard";
-import { DRIVER_EMPTY_COPY } from "@/components/driver/driver-empty-copy";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { listDriverLoadsFn } from "@/server/functions/driver/loads";
 import { formatRelativeFromNow } from "@/lib/format";
 
@@ -28,7 +28,7 @@ function DriverHomePage() {
   const data = Route.useLoaderData();
   const today = data.today;
 
-  const todayCopy = DRIVER_EMPTY_COPY["driver.todayLoad.none"];
+  const todayCopy = EMPTY_COPY["driver.todayLoad.none"];
 
   return (
     <div className="flex flex-col gap-6">

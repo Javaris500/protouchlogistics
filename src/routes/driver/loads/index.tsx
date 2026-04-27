@@ -5,7 +5,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Section } from "@/components/common/Section";
 import { LoadCard } from "@/components/driver/LoadCard";
-import { DRIVER_EMPTY_COPY } from "@/components/driver/driver-empty-copy";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { listDriverLoadsFn } from "@/server/functions/driver/loads";
 
 export const Route = createFileRoute("/driver/loads/")({
@@ -15,8 +15,8 @@ export const Route = createFileRoute("/driver/loads/")({
 
 function DriverLoadsPage() {
   const data = Route.useLoaderData();
-  const noneCopy = DRIVER_EMPTY_COPY["driver.todayLoad.none"];
-  const historyCopy = DRIVER_EMPTY_COPY["driver.loads.history.empty"];
+  const noneCopy = EMPTY_COPY["driver.todayLoad.none"];
+  const historyCopy = EMPTY_COPY["driver.loads.history.empty"];
 
   return (
     <div className="flex flex-col gap-6">

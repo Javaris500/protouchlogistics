@@ -37,6 +37,11 @@ function CdlStep() {
     key: string,
     preview: string,
     extracted: unknown,
+    fileMeta: {
+      fileName: string;
+      mimeType: string;
+      fileSizeBytes: number;
+    },
   ) => {
     setPreviewUrl(preview);
     const cdl = extracted as
@@ -49,6 +54,7 @@ function CdlStep() {
       | null;
     update({
       cdlPhotoKey: key,
+      cdlFile: fileMeta,
       ...(cdl
         ? {
             cdlNumber: cdl.number,

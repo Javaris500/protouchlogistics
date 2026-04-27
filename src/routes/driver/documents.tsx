@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { PageHeader } from "@/components/common/PageHeader";
 import { Section } from "@/components/common/Section";
 import { Card } from "@/components/ui/card";
-import { DRIVER_EMPTY_COPY } from "@/components/driver/driver-empty-copy";
+import { EMPTY_COPY } from "@/lib/empty-copy";
 import { toast } from "@/lib/toast";
 import { daysUntil, formatDateShort, formatRelativeFromNow } from "@/lib/format";
 import { getDriverSelfFn } from "@/server/functions/driver/me";
@@ -69,7 +69,7 @@ function DriverDocumentsPage() {
   }
 
   if (cdlDocs.length === 0 && medDocs.length === 0) {
-    const copy = DRIVER_EMPTY_COPY["driver.documents.firstTime"];
+    const copy = EMPTY_COPY["driver.documents.firstTime"];
     return (
       <div className="flex flex-col gap-6">
         <PageHeader
