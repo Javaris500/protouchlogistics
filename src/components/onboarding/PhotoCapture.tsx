@@ -69,26 +69,9 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
-async function fileToBase64(file: File): Promise<string> {
-  // FileReader.readAsDataURL is implemented in the browser's native code, so a
-  // 5–25 MB camera image converts in milliseconds. The previous implementation
-  // looped byte-by-byte building a string, which was O(n²) on large files and
-  // could hang the tab on real CDL photos.
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== "string") {
-        reject(new Error("Unexpected reader result"));
-        return;
-      }
-      const comma = result.indexOf(",");
-      resolve(comma >= 0 ? result.slice(comma + 1) : result);
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Read failed"));
-    reader.readAsDataURL(file);
-  });
-}
+// Photos now upload as raw multipart bodies, not base64-in-JSON, so no
+// fileToBase64 helper is needed. See pre-prod fix #4 in
+// sprint-docs/16-PRE-PROD-FIXES.md.
 
 /**
  * Onboarding photo capture (CDL / medical).
@@ -138,8 +121,6 @@ export function PhotoCapture({
       });
 
       try {
-        const contentBase64 = await fileToBase64(file);
-
         setState({
           kind: "extracting",
           previewUrl,
@@ -148,14 +129,11 @@ export function PhotoCapture({
         });
         onAiCall?.();
 
-        const result = await uploadOnboardingPhotoFn({
-          data: {
-            docType,
-            fileName: file.name,
-            mimeType: file.type || "image/jpeg",
-            contentBase64,
-          },
-        });
+        // Multipart upload — no base64 round-trip. See pre-prod fix #4.
+        const fd = new FormData();
+        fd.append("docType", docType);
+        fd.append("file", file);
+        const result = await uploadOnboardingPhotoFn({ data: fd });
 
         const fileMeta = {
           fileName: result.fileName,

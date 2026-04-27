@@ -318,17 +318,15 @@ function UploadButton({
   async function handleFile(file: File) {
     onBusy(slot);
     try {
-      const buf = await file.arrayBuffer();
-      const contentBase64 = bufferToBase64(buf);
-      await uploadDriverLoadDocFn({
-        data: {
-          loadId,
-          type,
-          fileName: file.name,
-          mimeType: file.type || "application/octet-stream",
-          contentBase64,
-        },
-      });
+      // Multipart upload — no base64 round-trip. See pre-prod fix #4 in
+      // sprint-docs/16-PRE-PROD-FIXES.md. Phone-camera BOL/POD photos
+      // (8–15 MB) used to inflate by 33% as base64-in-JSON and trip
+      // Vercel function body limits.
+      const fd = new FormData();
+      fd.append("loadId", loadId);
+      fd.append("type", type);
+      fd.append("file", file);
+      await uploadDriverLoadDocFn({ data: fd });
       toast.success(
         `${type === "load_bol" ? "BOL" : "POD"} uploaded`,
       );
@@ -386,15 +384,6 @@ function UploadButton({
       </label>
     </div>
   );
-}
-
-function bufferToBase64(buf: ArrayBuffer): string {
-  const bytes = new Uint8Array(buf);
-  let binary = "";
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]!);
-  }
-  return btoa(binary);
 }
 
 function formatDocType(t: DriverLoadDetail["documents"][number]["type"]): string {

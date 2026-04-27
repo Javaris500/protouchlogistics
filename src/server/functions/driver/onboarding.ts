@@ -92,13 +92,32 @@ async function requireOnboardingUser() {
 /* Photo upload + OCR                                               */
 /* ---------------------------------------------------------------- */
 
-const UploadInput = z.object({
-  docType: z.enum(["cdl", "medical"]),
-  fileName: z.string().min(1),
-  mimeType: z.string().min(1),
-  /** base64-encoded contents of the photo. Capped at 25 MB by the storage helper. */
-  contentBase64: z.string().min(1),
-});
+const DocTypeSchema = z.enum(["cdl", "medical"]);
+
+interface UploadOnboardingPhotoParsed {
+  docType: "cdl" | "medical";
+  file: File;
+}
+
+/**
+ * Parse a multipart/form-data body. Pre-prod fix #4: previous version sent
+ * the file as base64-in-JSON, inflating the body by 33% and tripping
+ * Vercel function body limits on real phone-camera photos. Now the browser
+ * sends the raw file via FormData, no encoding round-trip.
+ */
+function parseUploadOnboardingPhotoForm(
+  data: unknown,
+): UploadOnboardingPhotoParsed {
+  if (!(data instanceof FormData)) {
+    throw new Error("uploadOnboardingPhotoFn expects multipart/form-data");
+  }
+  const docType = DocTypeSchema.parse(data.get("docType"));
+  const fileRaw = data.get("file");
+  if (!(fileRaw instanceof File)) {
+    throw new Error("`file` field is required and must be a File");
+  }
+  return { docType, file: fileRaw };
+}
 
 export interface UploadOnboardingPhotoResult {
   blobKey: string;
@@ -118,13 +137,15 @@ export interface UploadOnboardingPhotoResult {
  *
  * The OCR helper internally retries up to 2× on transient errors. The
  * client caps user-driven re-uploads at 2 before forcing the manual form.
+ *
+ * Body shape: multipart/form-data with fields `docType` ("cdl" | "medical")
+ * and `file` (the binary). No base64 round-trip.
  */
 export const uploadOnboardingPhotoFn = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => UploadInput.parse(data))
+  .inputValidator(parseUploadOnboardingPhotoForm)
   .handler(async ({ data }): Promise<UploadOnboardingPhotoResult> => {
     const sessionUser = await requireOnboardingUser();
 
-    const buf = Buffer.from(data.contentBase64, "base64");
     const docType = data.docType === "cdl" ? "driver_cdl" : "driver_medical";
 
     const { blobKey } = await uploadDoc({
@@ -133,9 +154,9 @@ export const uploadOnboardingPhotoFn = createServerFn({ method: "POST" })
       // blob URL is stable across submitOnboardingProfileFn.
       ownerId: sessionUser.id,
       type: docType,
-      file: buf,
-      fileName: data.fileName,
-      mimeType: data.mimeType,
+      file: data.file,
+      fileName: data.file.name,
+      mimeType: data.file.type,
     });
 
     const extracted =
@@ -145,9 +166,9 @@ export const uploadOnboardingPhotoFn = createServerFn({ method: "POST" })
 
     return {
       blobKey,
-      fileName: data.fileName,
-      mimeType: data.mimeType,
-      fileSizeBytes: buf.byteLength,
+      fileName: data.file.name,
+      mimeType: data.file.type,
+      fileSizeBytes: data.file.size,
       extracted,
     };
   });

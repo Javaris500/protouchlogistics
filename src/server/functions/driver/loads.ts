@@ -396,17 +396,37 @@ export const updateDriverLoadStatusFn = createServerFn({ method: "POST" })
 
 /* ---------- Document upload ---------- */
 
-const UploadInput = z.object({
-  loadId: z.string().uuid(),
-  type: z.enum(["load_bol", "load_pod"]),
-  fileName: z.string().min(1),
-  mimeType: z.string().min(1),
-  /** base64-encoded file contents (small mobile uploads — fine for ≤25 MB). */
-  contentBase64: z.string().min(1),
-});
+const LoadDocTypeSchema = z.enum(["load_bol", "load_pod"]);
+
+interface UploadDriverLoadDocParsed {
+  loadId: string;
+  type: "load_bol" | "load_pod";
+  file: File;
+}
+
+/**
+ * Parse multipart/form-data. Pre-prod fix #4 — previously this fn took the
+ * file as base64-in-JSON, which inflated the body by 33% and would trip
+ * Vercel function body limits on full-quality phone-camera BOL/POD photos
+ * (8–15 MB common). Now the browser sends the raw file directly.
+ */
+function parseUploadDriverLoadDocForm(
+  data: unknown,
+): UploadDriverLoadDocParsed {
+  if (!(data instanceof FormData)) {
+    throw new Error("uploadDriverLoadDocFn expects multipart/form-data");
+  }
+  const loadId = z.string().uuid().parse(data.get("loadId"));
+  const type = LoadDocTypeSchema.parse(data.get("type"));
+  const fileRaw = data.get("file");
+  if (!(fileRaw instanceof File)) {
+    throw new Error("`file` field is required and must be a File");
+  }
+  return { loadId, type, file: fileRaw };
+}
 
 export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
-  .inputValidator((data: unknown) => UploadInput.parse(data))
+  .inputValidator(parseUploadDriverLoadDocForm)
   .handler(async ({ data }) => {
     const { sessionUser, driverId } = await requireDriverContext();
 
@@ -424,16 +444,13 @@ export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
       .limit(1);
     if (!load) throw new Error("Load not found");
 
-    // Decode base64 into a Buffer for the storage helper.
-    const buf = Buffer.from(data.contentBase64, "base64");
-
     const { blobKey } = await uploadDoc({
       ownerKind: "load",
       ownerId: data.loadId,
       type: data.type,
-      file: buf,
-      fileName: data.fileName,
-      mimeType: data.mimeType,
+      file: data.file,
+      fileName: data.file.name,
+      mimeType: data.file.type,
     });
 
     const inserted = await db
@@ -441,9 +458,9 @@ export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
       .values({
         type: data.type,
         blobKey,
-        fileName: data.fileName,
-        fileSizeBytes: buf.byteLength,
-        mimeType: data.mimeType,
+        fileName: data.file.name,
+        fileSizeBytes: data.file.size,
+        mimeType: data.file.type,
         uploadedByUserId: sessionUser.id,
         loadId: data.loadId,
       })

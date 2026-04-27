@@ -14,7 +14,7 @@ Two tiers below. Tier 1 must be fixed before the first real driver touches the a
 | 1 | DISPATCH_PHONE placeholder | **OPEN — needs Gary's real number** |
 | 2 | Onboarding draft hydration race | ✓ FIXED — `HydrationGate` in `routes/onboarding.tsx` |
 | 3 | Submit-twice not guarded | ✓ FIXED — server-side idempotency check in `submitOnboardingProfileFn` returns the existing `driverProfileId` instead of erroring |
-| 4 | base64 photo upload (33% inflation) | OPEN — Tier 2 |
+| 4 | base64 photo upload (33% inflation) | ✓ FIXED — multipart `FormData` everywhere; no JSON inflation. `uploadOnboardingPhotoFn` and `uploadDriverLoadDocFn` now take raw files |
 | 5 | No rate limit on AI endpoints | OPEN — Tier 2 |
 | 6 | No GPS verification on arrive_pickup/delivery | OPEN — Tier 2 (Phase 2 if no detention pay) |
 | 7 | Driver-scoped queries fetch full `loads` row | OPEN — Tier 2 |
