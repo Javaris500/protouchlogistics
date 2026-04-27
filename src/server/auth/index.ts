@@ -34,7 +34,11 @@ export const auth = betterAuth({
       verifications: verificationTokens,
     },
   }),
-  baseURL: env.BETTER_AUTH_URL ?? "http://localhost:3000",
+  baseURL:
+    env.BETTER_AUTH_URL ??
+    (process.env.VERCEL_URL
+      ? `https://${process.env.VERCEL_URL}`
+      : "http://localhost:3000"),
   secret: env.BETTER_AUTH_SECRET,
   emailAndPassword: {
     enabled: true,
@@ -79,7 +83,13 @@ export const auth = betterAuth({
     updateAge: 24 * 60 * 60,
     cookieCache: { enabled: true, maxAge: 5 * 60 },
   },
-  trustedOrigins: env.BETTER_AUTH_URL ? [env.BETTER_AUTH_URL] : [],
+  trustedOrigins: [
+    env.BETTER_AUTH_URL,
+    process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+    process.env.VERCEL_BRANCH_URL
+      ? `https://${process.env.VERCEL_BRANCH_URL}`
+      : null,
+  ].filter((url): url is string => Boolean(url)),
   advanced: {
     // Our schema uses uuid PKs with `defaultRandom()`. Setting generateId
     // to false defers ID assignment to the DB default so Better Auth
