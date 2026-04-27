@@ -1,5 +1,16 @@
 import { createServerFn } from "@tanstack/react-start";
-import { and, asc, desc, eq, gte, isNull, lte, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  lte,
+  notInArray,
+  sql,
+} from "drizzle-orm";
 import { z } from "zod";
 
 import { db } from "@/server/db";
@@ -12,7 +23,8 @@ import {
   loads,
 } from "@/server/db/schema";
 import { adminOnly } from "@/server/auth/middleware";
-import { NotFoundError } from "@/server/errors";
+import { BusinessRuleError, NotFoundError } from "@/server/errors";
+import { record as auditRecord } from "@/server/services/audit.service";
 
 /**
  * Invoices — read aggregates only (Phase 2 owns full lifecycle). Brief §3.2
@@ -140,6 +152,13 @@ export const listCompletedLoadsForBroker = createServerFn({ method: "GET" })
   .middleware([adminOnly])
   .inputValidator((data: unknown) => ListCompletedForBrokerInput.parse(data))
   .handler(async ({ data }) => {
+    // Exclude loads already attached to an invoice line item — those have
+    // been billed and shouldn't appear as billable again.
+    const billedSubquery = db
+      .selectDistinct({ loadId: invoiceLineItems.loadId })
+      .from(invoiceLineItems)
+      .where(sql`${invoiceLineItems.loadId} IS NOT NULL`);
+
     const rows = await db
       .select()
       .from(loads)
@@ -148,6 +167,7 @@ export const listCompletedLoadsForBroker = createServerFn({ method: "GET" })
           eq(loads.brokerId, data.brokerId),
           eq(loads.status, "completed"),
           isNull(loads.deletedAt),
+          notInArray(loads.id, billedSubquery),
         ),
       )
       .orderBy(desc(loads.createdAt))
@@ -163,4 +183,262 @@ export const listCompletedLoadsForBroker = createServerFn({ method: "GET" })
         completedAt: l.updatedAt.toISOString(),
       })),
     };
+  });
+
+const CreateInvoiceInput = z.object({
+  brokerId: z.string().uuid(),
+  loadIds: z.array(z.string().uuid()).min(1),
+  adjustmentsCents: z.number().int().default(0),
+  notes: z.string().nullable().optional(),
+});
+
+const PAYMENT_TERMS_DAYS: Record<string, number> = {
+  net_15: 15,
+  net_30: 30,
+  net_45: 45,
+  net_60: 60,
+  quick_pay: 7,
+  other: 30,
+};
+
+function nextInvoiceNumber(existingMax: string | null): string {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  // Pull the numeric suffix from the highest INV-YYYY-NNNN this year, if any.
+  let nextSeq = 1;
+  if (existingMax && existingMax.startsWith(prefix)) {
+    const seq = parseInt(existingMax.slice(prefix.length), 10);
+    if (!Number.isNaN(seq)) nextSeq = seq + 1;
+  }
+  return `${prefix}${String(nextSeq).padStart(4, "0")}`;
+}
+
+export const createInvoice = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .inputValidator((data: unknown) => CreateInvoiceInput.parse(data))
+  .handler(async ({ data, context }) => {
+    return db.transaction(async (tx) => {
+      // 1. Validate broker exists.
+      const broker = await tx.query.brokers.findFirst({
+        where: and(eq(brokers.id, data.brokerId), isNull(brokers.deletedAt)),
+      });
+      if (!broker) throw new NotFoundError("Broker");
+
+      // 2. Validate every load: belongs to this broker, completed, not
+      // already billed, not deleted.
+      const candidateLoads = await tx
+        .select({
+          id: loads.id,
+          loadNumber: loads.loadNumber,
+          rate: loads.rate,
+          status: loads.status,
+          brokerId: loads.brokerId,
+          deletedAt: loads.deletedAt,
+        })
+        .from(loads)
+        .where(inArray(loads.id, data.loadIds));
+
+      if (candidateLoads.length !== data.loadIds.length) {
+        throw new NotFoundError("One or more loads");
+      }
+      for (const l of candidateLoads) {
+        if (l.brokerId !== data.brokerId) {
+          throw new BusinessRuleError(
+            `Load ${l.loadNumber} doesn't belong to this broker`,
+          );
+        }
+        if (l.status !== "completed") {
+          throw new BusinessRuleError(
+            `Load ${l.loadNumber} isn't completed yet`,
+          );
+        }
+        if (l.deletedAt) {
+          throw new BusinessRuleError(`Load ${l.loadNumber} is archived`);
+        }
+      }
+
+      // Already-billed check — guard against double-invoicing the same load.
+      const alreadyBilled = await tx
+        .select({ loadId: invoiceLineItems.loadId })
+        .from(invoiceLineItems)
+        .where(inArray(invoiceLineItems.loadId, data.loadIds));
+      if (alreadyBilled.length > 0) {
+        throw new BusinessRuleError(
+          "One or more loads are already on a different invoice",
+        );
+      }
+
+      // 3. Generate invoice number.
+      const [maxRow] = await tx
+        .select({ max: sql<string>`max(${invoices.invoiceNumber})` })
+        .from(invoices)
+        .where(sql`${invoices.invoiceNumber} LIKE ${"INV-" + new Date().getFullYear() + "-%"}`);
+      const invoiceNumber = nextInvoiceNumber(maxRow?.max ?? null);
+
+      // 4. Compute totals.
+      const subtotalCents = candidateLoads.reduce(
+        (sum, l) => sum + l.rate,
+        0,
+      );
+      const totalCents = subtotalCents + data.adjustmentsCents;
+
+      const today = new Date();
+      const issueDate = today.toISOString().slice(0, 10);
+      const termDays =
+        PAYMENT_TERMS_DAYS[broker.paymentTerms] ?? 30;
+      const due = new Date(today);
+      due.setDate(due.getDate() + termDays);
+      const dueDate = due.toISOString().slice(0, 10);
+
+      // 5. Insert invoice row.
+      const [created] = await tx
+        .insert(invoices)
+        .values({
+          invoiceNumber,
+          brokerId: data.brokerId,
+          status: "draft",
+          subtotalCents,
+          adjustmentsCents: data.adjustmentsCents,
+          totalCents,
+          issueDate,
+          dueDate,
+          notes: data.notes ?? null,
+          createdByUserId: context.user.id,
+        })
+        .returning();
+      if (!created) throw new Error("Invoice insert failed");
+
+      // 6. Insert line items, one per load.
+      await tx.insert(invoiceLineItems).values(
+        candidateLoads.map((l, idx) => ({
+          invoiceId: created.id,
+          loadId: l.id,
+          description: `Load ${l.loadNumber}`,
+          amountCents: l.rate,
+          sortOrder: idx,
+        })),
+      );
+
+      // 7. Audit.
+      await auditRecord(
+        {
+          userId: context.user.id,
+          action: "invoice.created",
+          entityType: "invoice",
+          entityId: created.id,
+          changes: {
+            invoiceNumber,
+            brokerId: data.brokerId,
+            loadCount: candidateLoads.length,
+            totalCents,
+          },
+        },
+        tx,
+      );
+
+      return {
+        invoice: {
+          id: created.id,
+          invoiceNumber: created.invoiceNumber,
+          status: created.status,
+          totalCents: created.totalCents,
+        },
+      };
+    });
+  });
+
+const MarkInvoicePaidInput = z.object({
+  invoiceId: z.string().uuid(),
+  paidAmountCents: z.number().int().min(0).optional(),
+  paymentMethod: z.string().min(1).max(40).optional(),
+});
+
+export const markInvoicePaid = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .inputValidator((data: unknown) => MarkInvoicePaidInput.parse(data))
+  .handler(async ({ data, context }) => {
+    return db.transaction(async (tx) => {
+      const invoice = await tx.query.invoices.findFirst({
+        where: eq(invoices.id, data.invoiceId),
+      });
+      if (!invoice) throw new NotFoundError("Invoice");
+      if (invoice.status === "paid") {
+        throw new BusinessRuleError("Invoice is already marked paid");
+      }
+      if (invoice.status === "void") {
+        throw new BusinessRuleError("Cannot mark a void invoice as paid");
+      }
+
+      const paidAmount = data.paidAmountCents ?? invoice.totalCents;
+      const now = new Date();
+
+      const [updated] = await tx
+        .update(invoices)
+        .set({
+          status: "paid",
+          paidAt: now,
+          paidAmountCents: paidAmount,
+          paymentMethod: data.paymentMethod ?? null,
+          updatedAt: now,
+        })
+        .where(eq(invoices.id, invoice.id))
+        .returning();
+      if (!updated) throw new Error("Invoice update failed");
+
+      await auditRecord(
+        {
+          userId: context.user.id,
+          action: "invoice.marked_paid",
+          entityType: "invoice",
+          entityId: invoice.id,
+          changes: {
+            paidAmountCents: paidAmount,
+            paymentMethod: data.paymentMethod ?? null,
+          },
+        },
+        tx,
+      );
+
+      return { invoice: updated };
+    });
+  });
+
+const SendInvoiceInput = z.object({ invoiceId: z.string().uuid() });
+
+export const markInvoiceSent = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .inputValidator((data: unknown) => SendInvoiceInput.parse(data))
+  .handler(async ({ data, context }) => {
+    return db.transaction(async (tx) => {
+      const invoice = await tx.query.invoices.findFirst({
+        where: eq(invoices.id, data.invoiceId),
+      });
+      if (!invoice) throw new NotFoundError("Invoice");
+      if (invoice.status !== "draft") {
+        throw new BusinessRuleError(
+          `Invoice is ${invoice.status}, only drafts can be sent`,
+        );
+      }
+
+      const now = new Date();
+      const [updated] = await tx
+        .update(invoices)
+        .set({ status: "sent", sentAt: now, updatedAt: now })
+        .where(eq(invoices.id, invoice.id))
+        .returning();
+      if (!updated) throw new Error("Invoice update failed");
+
+      await auditRecord(
+        {
+          userId: context.user.id,
+          action: "invoice.sent",
+          entityType: "invoice",
+          entityId: invoice.id,
+          changes: { sentAt: now.toISOString() },
+        },
+        tx,
+      );
+
+      return { invoice: updated };
+    });
   });
