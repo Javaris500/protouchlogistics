@@ -1,25 +1,31 @@
 import { createFileRoute } from "@tanstack/react-router";
 
-import { dbHealthFn, echoPostFn } from "@/server/functions/health";
+import {
+  blobHealthFn,
+  dbHealthFn,
+  echoPostFn,
+} from "@/server/functions/health";
 
 // Keep echoPostFn referenced so the build bundles it. Diagnostic only.
 void echoPostFn;
 
 /**
- * Diagnostic route. Runs `select now()` against the configured DB and
- * dumps the result. Use to distinguish "DB unreachable from Vercel" from
- * other failure modes during incident triage.
+ * Diagnostic route. Checks DB connectivity and Vercel Blob read/write.
+ * Navigate to /health to verify the upload pipeline is configured correctly.
  */
 export const Route = createFileRoute("/health")({
-  loader: async () => dbHealthFn(),
+  loader: async () => {
+    const [db, blob] = await Promise.all([dbHealthFn(), blobHealthFn()]);
+    return { db, blob };
+  },
   component: HealthPage,
 });
 
 function HealthPage() {
-  const data = Route.useLoaderData();
+  const { db, blob } = Route.useLoaderData();
   return (
     <pre style={{ padding: 24, fontFamily: "monospace", fontSize: 13 }}>
-      {JSON.stringify(data, null, 2)}
+      {JSON.stringify({ db, blob }, null, 2)}
     </pre>
   );
 }

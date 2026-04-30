@@ -17,13 +17,15 @@ import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ExpirationBadge } from "@/components/ui/expiration-badge";
+import { errorMessage } from "@/lib/errors";
 import { EMPTY_COPY } from "@/lib/empty-copy";
 import { toast } from "@/lib/toast";
 import {
-  createDocument,
   deleteDocument,
   downloadDocument,
+  finalizeDocumentUploadFn,
   listDocuments,
+  type FinalizeDocumentPayload,
 } from "@/server/functions/documents";
 
 export const Route = createFileRoute("/admin/documents")({
@@ -67,12 +69,14 @@ function DocumentsPage() {
   });
 
   const createMutation = useMutation({
-    mutationFn: (formData: FormData) => createDocument({ data: formData }),
+    mutationFn: (payload: FinalizeDocumentPayload) =>
+      finalizeDocumentUploadFn({ data: payload }),
     onSuccess: () => {
       toast.success("Document uploaded");
       queryClient.invalidateQueries({ queryKey: ["documents.list"] });
       queryClient.invalidateQueries({ queryKey: ["documents.expiring"] });
     },
+    onError: (err) => toast.error(errorMessage(err)),
   });
 
   const deleteMutation = useMutation({
@@ -326,8 +330,8 @@ function DocumentsPage() {
         onOpenChange={setUploadOpen}
         ownerKind={ownerKind}
         ownerId={ownerId || undefined}
-        onSubmit={async (fd) => {
-          await createMutation.mutateAsync(fd);
+        onSubmit={async (payload) => {
+          await createMutation.mutateAsync(payload);
         }}
       />
     </div>

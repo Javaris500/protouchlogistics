@@ -49,7 +49,10 @@ import {
 } from "@/server/functions/trucks";
 import { listLoadsAdmin } from "@/server/functions/loads";
 import { listDrivers } from "@/server/functions/drivers";
-import { createDocument } from "@/server/functions/documents";
+import {
+  finalizeDocumentUploadFn,
+  type FinalizeDocumentPayload,
+} from "@/server/functions/documents";
 import { DocumentPanel } from "@/components/common/DocumentPanel";
 import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
 import {
@@ -88,7 +91,8 @@ function TruckDetailPage() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (formData: FormData) => createDocument({ data: formData }),
+    mutationFn: (payload: FinalizeDocumentPayload) =>
+      finalizeDocumentUploadFn({ data: payload }),
     onSuccess: () => {
       toast.success("Document uploaded");
       queryClient.invalidateQueries({ queryKey: ["admin", "truck", truckId] });
@@ -427,8 +431,8 @@ function TruckDetailPage() {
         onOpenChange={setUploadOpen}
         ownerKind="truck"
         ownerId={truckId}
-        onSubmit={async (fd) => {
-          await uploadMutation.mutateAsync(fd);
+        onSubmit={async (payload) => {
+          await uploadMutation.mutateAsync(payload);
         }}
       />
 

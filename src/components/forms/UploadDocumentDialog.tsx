@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { put } from "@vercel/blob/client";
 import { Upload } from "lucide-react";
 import * as React from "react";
 
@@ -14,6 +15,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { listDrivers } from "@/server/functions/drivers";
+import {
+  requestUploadTokenFn,
+  type FinalizeDocumentPayload,
+} from "@/server/functions/documents";
 import { listLoadsAdmin } from "@/server/functions/loads";
 import { listTrucks } from "@/server/functions/trucks";
 
@@ -75,8 +80,8 @@ interface UploadDocumentDialogProps {
   ownerId?: string;
   /** Pre-selected doc type. */
   defaultType?: string;
-  /** Called with FormData after a successful upload. */
-  onSubmit: (formData: FormData) => Promise<void>;
+  /** Called with the finalize payload after the file has been uploaded to Blob. */
+  onSubmit: (payload: FinalizeDocumentPayload) => Promise<void>;
 }
 
 export function UploadDocumentDialog({
@@ -216,14 +221,38 @@ export function UploadDocumentDialog({
 
     setSubmitting(true);
     try {
-      const fd = new FormData();
-      fd.append("ownerKind", resolvedKind);
-      fd.append("ownerId", ownerId);
-      fd.append("type", type);
-      fd.append("file", file);
-      if (expiration) fd.append("expirationDate", expiration);
-      if (notes.trim()) fd.append("notes", notes.trim());
-      await onSubmit(fd);
+      // Step 1: server validates auth/owner/type, returns a scoped token.
+      const { token, pathname } = await requestUploadTokenFn({
+        data: {
+          ownerKind: resolvedKind,
+          ownerId,
+          type,
+          fileName: file.name,
+          mimeType: file.type,
+          fileSizeBytes: file.size,
+        },
+      });
+
+      // Step 2: browser uploads directly to Vercel Blob — bypasses the
+      // 4.5 MB function body limit entirely.
+      const result = await put(pathname, file, {
+        access: "private",
+        token,
+        multipart: true,
+      });
+
+      // Step 3: parent writes the DB record.
+      await onSubmit({
+        blobKey: result.url,
+        ownerKind: resolvedKind,
+        ownerId,
+        type: type as FinalizeDocumentPayload["type"],
+        fileName: file.name,
+        mimeType: file.type,
+        fileSizeBytes: file.size,
+        expirationDate: expiration || null,
+        notes: notes.trim() || null,
+      });
       onOpenChange(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Upload failed.");
@@ -298,7 +327,7 @@ export function UploadDocumentDialog({
       <FormField label="File" required>
         <Input
           type="file"
-          accept="application/pdf,image/jpeg,image/png,image/heic,image/webp"
+          accept="application/pdf,image/jpeg,image/jpg,image/png,image/heic,image/heif,image/webp"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
         {file && (

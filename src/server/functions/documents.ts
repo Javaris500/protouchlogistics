@@ -1,5 +1,8 @@
+import { randomUUID } from "node:crypto";
+
 import { createServerFn } from "@tanstack/react-start";
-import { get } from "@vercel/blob";
+import { get, head } from "@vercel/blob";
+import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client";
 import {
   and,
   desc,
@@ -579,3 +582,176 @@ function ownerColumnsFor(
 
 // Suppress unused-warning on `or` if downstream doesn't use the import yet.
 void or;
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Client-side upload support (Bug 4 fix — bypasses 4.5 MB function limit)
+
+   Flow:
+   1. Browser calls requestUploadTokenFn  → server validates auth/owner/type,
+      returns a short-lived Vercel Blob client token + destination pathname.
+   2. Browser calls upload() from @vercel/blob/client directly — file travels
+      from browser straight to Vercel Blob, never through the function body.
+   3. Browser calls finalizeDocumentUploadFn → server verifies the blob
+      landed, writes the DB record, and records the audit entry.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const ALLOWED_CLIENT_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "image/heif",
+  "image/webp",
+]);
+
+const OWNER_KIND_PATH_MAP: Record<DocOwnerKind, string> = {
+  driver: "drivers",
+  truck: "trucks",
+  load: "loads",
+};
+
+function extFor(fileName: string, mimeType: string): string {
+  const dot = fileName.lastIndexOf(".");
+  if (dot >= 0 && dot < fileName.length - 1) return fileName.slice(dot + 1).toLowerCase();
+  const slash = mimeType.lastIndexOf("/");
+  return slash >= 0 ? mimeType.slice(slash + 1) : "bin";
+}
+
+const RequestUploadTokenInput = z.object({
+  ownerKind: OwnerKindZ,
+  ownerId: z.string().uuid(),
+  type: DocTypeZ,
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileSizeBytes: z.number().int().positive(),
+});
+
+/** Step 1: validate auth + owner, return a scoped Blob client token. */
+export const requestUploadTokenFn = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .inputValidator((data: unknown) => RequestUploadTokenInput.parse(data))
+  .handler(async ({ data }) => {
+    if (!ALLOWED_CLIENT_TYPES.has(data.mimeType)) {
+      throw new ValidationError(`Unsupported file type: ${data.mimeType}`);
+    }
+    if (data.fileSizeBytes > 25 * 1024 * 1024) {
+      throw new ValidationError("File too large — max 25 MB");
+    }
+    if (ownerKindForDocType(data.type) !== data.ownerKind) {
+      throw new BusinessRuleError(
+        `Document type ${data.type} cannot be assigned to a ${data.ownerKind}`,
+      );
+    }
+    await assertOwnerExists(data.ownerKind, data.ownerId);
+
+    const ext = extFor(data.fileName, data.mimeType);
+    const pathname = `${OWNER_KIND_PATH_MAP[data.ownerKind]}/${data.ownerId}/${data.type}/${randomUUID()}.${ext}`;
+
+    const token = await generateClientTokenFromReadWriteToken({
+      token: env.BLOB_READ_WRITE_TOKEN,
+      pathname,
+      allowedContentTypes: [data.mimeType],
+      maximumSizeInBytes: 25 * 1024 * 1024,
+    });
+
+    return { token, pathname };
+  });
+
+export interface FinalizeDocumentPayload {
+  blobKey: string;
+  ownerKind: DocOwnerKind;
+  ownerId: string;
+  type: DocTypeValue;
+  fileName: string;
+  mimeType: string;
+  fileSizeBytes: number;
+  expirationDate: string | null;
+  notes: string | null;
+}
+
+const FinalizeDocumentInput = z.object({
+  blobKey: z.string().url(),
+  ownerKind: OwnerKindZ,
+  ownerId: z.string().uuid(),
+  type: DocTypeZ,
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileSizeBytes: z.number().int().positive(),
+  expirationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+  notes: z.string().nullable(),
+});
+
+/** Step 3: verify blob landed, write DB record and audit entry. */
+export const finalizeDocumentUploadFn = createServerFn({ method: "POST" })
+  .middleware([adminOnly])
+  .inputValidator((data: unknown) => FinalizeDocumentInput.parse(data))
+  .handler(async ({ data, context }) => {
+    if (ownerKindForDocType(data.type) !== data.ownerKind) {
+      throw new BusinessRuleError(
+        `Document type ${data.type} cannot be assigned to a ${data.ownerKind}`,
+      );
+    }
+    if (EXPIRABLE_DOC_TYPES.has(data.type) && !data.expirationDate) {
+      throw new ValidationError(`Document type ${data.type} requires an expiration date`);
+    }
+
+    try {
+      await head(data.blobKey, { token: env.BLOB_READ_WRITE_TOKEN });
+    } catch {
+      throw new NotFoundError("Uploaded file — upload may not have completed");
+    }
+
+    return db.transaction(async (tx) => {
+      const ownerColumns = ownerColumnsFor(data.ownerKind, data.ownerId);
+      const [created] = await tx
+        .insert(documents)
+        .values({
+          type: data.type,
+          blobKey: data.blobKey,
+          fileName: data.fileName,
+          fileSizeBytes: data.fileSizeBytes,
+          mimeType: data.mimeType,
+          uploadedByUserId: context.user.id,
+          ...ownerColumns,
+          expirationDate: data.expirationDate,
+          notes: data.notes,
+        })
+        .returning();
+      if (!created) throw new Error("Failed to insert document");
+
+      await auditRecord(
+        {
+          userId: context.user.id,
+          action: "document.uploaded",
+          entityType: "document",
+          entityId: created.id,
+          changes: {
+            type: created.type,
+            ownerKind: data.ownerKind,
+            ownerId: data.ownerId,
+            fileName: data.fileName,
+          },
+        },
+        tx,
+      );
+
+      return {
+        document: {
+          id: created.id,
+          type: created.type,
+          fileName: created.fileName,
+          fileSizeBytes: created.fileSizeBytes,
+          mimeType: created.mimeType,
+          driverProfileId: created.driverProfileId,
+          truckId: created.truckId,
+          loadId: created.loadId,
+          expirationDate: created.expirationDate,
+          notes: created.notes,
+          uploadedByUserId: created.uploadedByUserId,
+          createdAt: created.createdAt.toISOString(),
+          updatedAt: created.updatedAt.toISOString(),
+        },
+      };
+    });
+  });

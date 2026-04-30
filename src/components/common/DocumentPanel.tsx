@@ -11,10 +11,11 @@ import { ExpirationBadge } from "@/components/ui/expiration-badge";
 import { errorMessage } from "@/lib/errors";
 import { toast } from "@/lib/toast";
 import {
-  createDocument,
   deleteDocument,
   downloadDocument,
+  finalizeDocumentUploadFn,
   listDocuments,
+  type FinalizeDocumentPayload,
 } from "@/server/functions/documents";
 
 type OwnerKind = "driver" | "truck" | "load";
@@ -77,11 +78,11 @@ export function DocumentPanel({
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (formData: FormData) => createDocument({ data: formData }),
+    mutationFn: (payload: FinalizeDocumentPayload) =>
+      finalizeDocumentUploadFn({ data: payload }),
     onSuccess: () => {
       toast.success("Document uploaded");
       queryClient.invalidateQueries({ queryKey });
-      // Cross-cut: the global documents page also shows this row.
       queryClient.invalidateQueries({ queryKey: ["documents.list"] });
       queryClient.invalidateQueries({ queryKey: ["documents.expiring"] });
     },
@@ -234,8 +235,8 @@ export function DocumentPanel({
         ownerKind={ownerKind}
         ownerId={ownerId}
         defaultType={defaultUploadType}
-        onSubmit={async (fd) => {
-          await uploadMutation.mutateAsync(fd);
+        onSubmit={async (payload) => {
+          await uploadMutation.mutateAsync(payload);
         }}
       />
     </Card>

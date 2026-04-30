@@ -24,8 +24,11 @@ import {
   formatRelativeFromNow,
 } from "@/lib/format";
 import { dialUrl, mapsUrl } from "@/lib/dispatch";
+import { put } from "@vercel/blob/client";
+
 import {
   getDriverLoadFn,
+  requestDriverUploadTokenFn,
   updateDriverLoadStatusFn,
   uploadDriverLoadDocFn,
   type DriverLoadDetail,
@@ -318,18 +321,38 @@ function UploadButton({
   async function handleFile(file: File) {
     onBusy(slot);
     try {
-      // Multipart upload — no base64 round-trip. See pre-prod fix #4 in
-      // sprint-docs/16-PRE-PROD-FIXES.md. Phone-camera BOL/POD photos
-      // (8–15 MB) used to inflate by 33% as base64-in-JSON and trip
-      // Vercel function body limits.
-      const fd = new FormData();
-      fd.append("loadId", loadId);
-      fd.append("type", type);
-      fd.append("file", file);
-      await uploadDriverLoadDocFn({ data: fd });
-      toast.success(
-        `${type === "load_bol" ? "BOL" : "POD"} uploaded`,
-      );
+      // Step 1: get a scoped client token from the server.
+      const { token, pathname } = await requestDriverUploadTokenFn({
+        data: {
+          loadId,
+          type,
+          fileName: file.name,
+          mimeType: file.type,
+          fileSizeBytes: file.size,
+        },
+      });
+
+      // Step 2: upload directly to Vercel Blob — bypasses the 4.5 MB
+      // function body limit so full-quality phone-camera photos work.
+      const result = await put(pathname, file, {
+        access: "private",
+        token,
+        multipart: true,
+      });
+
+      // Step 3: write the DB record.
+      await uploadDriverLoadDocFn({
+        data: {
+          loadId,
+          type,
+          blobKey: result.url,
+          fileName: file.name,
+          mimeType: file.type,
+          fileSizeBytes: file.size,
+        },
+      });
+
+      toast.success(`${type === "load_bol" ? "BOL" : "POD"} uploaded`);
       onDone();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Upload failed");

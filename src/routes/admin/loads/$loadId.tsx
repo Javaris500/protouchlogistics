@@ -68,7 +68,10 @@ import {
   updateLoadStatus,
 } from "@/server/functions/loads";
 import { listDrivers } from "@/server/functions/drivers";
-import { createDocument } from "@/server/functions/documents";
+import {
+  finalizeDocumentUploadFn,
+  type FinalizeDocumentPayload,
+} from "@/server/functions/documents";
 import { UploadDocumentDialog } from "@/components/forms/UploadDocumentDialog";
 import {
   Dialog,
@@ -152,7 +155,8 @@ function LoadDetailPage() {
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (formData: FormData) => createDocument({ data: formData }),
+    mutationFn: (payload: FinalizeDocumentPayload) =>
+      finalizeDocumentUploadFn({ data: payload }),
     onSuccess: () => {
       toast.success("Document uploaded");
       queryClient.invalidateQueries({ queryKey: ["admin", "load", loadId] });
@@ -221,8 +225,8 @@ function LoadDetailPage() {
         ownerKind="load"
         ownerId={loadId}
         defaultType={uploadDefaultType}
-        onSubmit={async (fd) => {
-          await uploadMutation.mutateAsync(fd);
+        onSubmit={async (payload) => {
+          await uploadMutation.mutateAsync(payload);
         }}
       />
 
@@ -1153,15 +1157,13 @@ function LoadDocumentsPanel({
                 <Badge variant="muted" className="text-[10px]">
                   {uploaded.length > 0 ? "Uploaded" : "Not uploaded"}
                 </Badge>
-                {expected && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => onUpload(spec.dbType)}
-                  >
-                    <Upload className="size-3.5" /> Upload
-                  </Button>
-                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onUpload(spec.dbType)}
+                >
+                  <Upload className="size-3.5" /> Upload
+                </Button>
               </div>
             </li>
           );

@@ -35,8 +35,10 @@ const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB; matches 02-DATA-MODEL §6.
 const ALLOWED_MIME_TYPES = new Set([
   "application/pdf",
   "image/jpeg",
+  "image/jpg",
   "image/png",
   "image/heic",
+  "image/heif",
   "image/webp",
 ]);
 

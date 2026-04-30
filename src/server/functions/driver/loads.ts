@@ -1,4 +1,7 @@
+import { randomUUID } from "node:crypto";
+
 import { createServerFn } from "@tanstack/react-start";
+import { generateClientTokenFromReadWriteToken } from "@vercel/blob/client";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import { z } from "zod";
 
@@ -14,7 +17,7 @@ import {
   type Load,
   type LoadStop,
 } from "@/server/db/schema";
-import { uploadDoc } from "@/server/storage";
+import { env } from "@/server/env";
 import { requireDriverContext } from "./_helpers";
 
 /* ---------- Types ---------- */
@@ -421,39 +424,85 @@ export const updateDriverLoadStatusFn = createServerFn({ method: "POST" })
 
 const LoadDocTypeSchema = z.enum(["load_bol", "load_pod"]);
 
-interface UploadDriverLoadDocParsed {
-  loadId: string;
-  type: "load_bol" | "load_pod";
-  file: File;
+const ALLOWED_DRIVER_UPLOAD_TYPES = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/jpg",
+  "image/png",
+  "image/heic",
+  "image/heif",
+  "image/webp",
+]);
+
+function extFor(fileName: string, mimeType: string): string {
+  const dot = fileName.lastIndexOf(".");
+  if (dot >= 0 && dot < fileName.length - 1) return fileName.slice(dot + 1).toLowerCase();
+  const slash = mimeType.lastIndexOf("/");
+  return slash >= 0 ? mimeType.slice(slash + 1) : "bin";
 }
 
-/**
- * Parse multipart/form-data. Pre-prod fix #4 — previously this fn took the
- * file as base64-in-JSON, which inflated the body by 33% and would trip
- * Vercel function body limits on full-quality phone-camera BOL/POD photos
- * (8–15 MB common). Now the browser sends the raw file directly.
- */
-function parseUploadDriverLoadDocForm(
-  data: unknown,
-): UploadDriverLoadDocParsed {
-  if (!(data instanceof FormData)) {
-    throw new Error("uploadDriverLoadDocFn expects multipart/form-data");
-  }
-  const loadId = z.string().uuid().parse(data.get("loadId"));
-  const type = LoadDocTypeSchema.parse(data.get("type"));
-  const fileRaw = data.get("file");
-  if (!(fileRaw instanceof File)) {
-    throw new Error("`file` field is required and must be a File");
-  }
-  return { loadId, type, file: fileRaw };
-}
+const RequestDriverUploadTokenInput = z.object({
+  loadId: z.string().uuid(),
+  type: LoadDocTypeSchema,
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileSizeBytes: z.number().int().positive(),
+});
 
+/** Step 1 (driver): validate ownership, return a scoped Blob client token. */
+export const requestDriverUploadTokenFn = createServerFn({ method: "POST" })
+  .inputValidator((data: unknown) => RequestDriverUploadTokenInput.parse(data))
+  .handler(async ({ data }) => {
+    const { driverId } = await requireDriverContext();
+
+    if (!ALLOWED_DRIVER_UPLOAD_TYPES.has(data.mimeType)) {
+      throw new Error(`Unsupported file type: ${data.mimeType}`);
+    }
+    if (data.fileSizeBytes > 25 * 1024 * 1024) {
+      throw new Error("File too large — max 25 MB");
+    }
+
+    const [load] = await db
+      .select({ id: loads.id })
+      .from(loads)
+      .where(
+        and(
+          eq(loads.id, data.loadId),
+          eq(loads.assignedDriverId, driverId),
+          isNull(loads.deletedAt),
+        ),
+      )
+      .limit(1);
+    if (!load) throw new Error("Load not found");
+
+    const ext = extFor(data.fileName, data.mimeType);
+    const pathname = `loads/${data.loadId}/${data.type}/${randomUUID()}.${ext}`;
+
+    const token = await generateClientTokenFromReadWriteToken({
+      token: env.BLOB_READ_WRITE_TOKEN,
+      pathname,
+      allowedContentTypes: [data.mimeType],
+      maximumSizeInBytes: 25 * 1024 * 1024,
+    });
+
+    return { token, pathname };
+  });
+
+const FinalizeDriverLoadDocInput = z.object({
+  loadId: z.string().uuid(),
+  type: LoadDocTypeSchema,
+  blobKey: z.string().url(),
+  fileName: z.string().min(1),
+  mimeType: z.string().min(1),
+  fileSizeBytes: z.number().int().positive(),
+});
+
+/** Step 3 (driver): write DB record after client has uploaded the blob. */
 export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
-  .inputValidator(parseUploadDriverLoadDocForm)
+  .inputValidator((data: unknown) => FinalizeDriverLoadDocInput.parse(data))
   .handler(async ({ data }) => {
     const { sessionUser, driverId } = await requireDriverContext();
 
-    // Confirm load is assigned to this driver.
     const [load] = await db
       .select({ id: loads.id, status: loads.status })
       .from(loads)
@@ -467,23 +516,14 @@ export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
       .limit(1);
     if (!load) throw new Error("Load not found");
 
-    const { blobKey } = await uploadDoc({
-      ownerKind: "load",
-      ownerId: data.loadId,
-      type: data.type,
-      file: data.file,
-      fileName: data.file.name,
-      mimeType: data.file.type,
-    });
-
     const inserted = await db
       .insert(documents)
       .values({
         type: data.type,
-        blobKey,
-        fileName: data.file.name,
-        fileSizeBytes: data.file.size,
-        mimeType: data.file.type,
+        blobKey: data.blobKey,
+        fileName: data.fileName,
+        fileSizeBytes: data.fileSizeBytes,
+        mimeType: data.mimeType,
         uploadedByUserId: sessionUser.id,
         loadId: data.loadId,
       })
@@ -491,8 +531,7 @@ export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
     const doc = inserted[0];
     if (!doc) throw new Error("Insert failed");
 
-    // POD upload after delivery flips status to pod_uploaded so admin can
-    // close out the load. BOL uploads do not transition status.
+    // POD upload after delivery flips status to pod_uploaded.
     if (data.type === "load_pod" && load.status === "delivered") {
       await db.transaction(async (tx) => {
         await tx
@@ -510,7 +549,7 @@ export const uploadDriverLoadDocFn = createServerFn({ method: "POST" })
 
     return {
       id: doc.id,
-      blobKey,
+      blobKey: data.blobKey,
       fileName: doc.fileName,
       type: doc.type,
     };
