@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { put } from "@vercel/blob/client";
 import { Upload } from "lucide-react";
 import * as React from "react";
@@ -22,7 +23,7 @@ import {
 import { listLoadsAdmin } from "@/server/functions/loads";
 import { listTrucks } from "@/server/functions/trucks";
 
-export type UploadOwnerKind = "driver" | "truck" | "load";
+export type UploadOwnerKind = "driver" | "truck" | "load" | "company";
 
 const DRIVER_TYPES = [
   { value: "driver_cdl", label: "CDL" },
@@ -48,7 +49,21 @@ const LOAD_TYPES = [
   { value: "load_other", label: "Other (load)" },
 ] as const;
 
-const ALL_TYPES = [...DRIVER_TYPES, ...TRUCK_TYPES, ...LOAD_TYPES];
+const COMPANY_TYPES = [
+  { value: "company_mc_authority", label: "MC authority" },
+  { value: "company_operating_authority", label: "DOT operating authority" },
+  { value: "company_w9", label: "W-9" },
+  { value: "company_liability_insurance", label: "Liability insurance" },
+  { value: "company_cargo_insurance", label: "Cargo insurance" },
+  { value: "company_other", label: "Other (company)" },
+] as const;
+
+const ALL_TYPES = [
+  ...DRIVER_TYPES,
+  ...TRUCK_TYPES,
+  ...LOAD_TYPES,
+  ...COMPANY_TYPES,
+];
 
 const EXPIRABLE = new Set([
   "driver_cdl",
@@ -56,12 +71,15 @@ const EXPIRABLE = new Set([
   "truck_registration",
   "truck_insurance",
   "truck_inspection",
+  "company_liability_insurance",
+  "company_cargo_insurance",
 ]);
 
 function ownerKindFromType(type: string): UploadOwnerKind | null {
   if (type.startsWith("driver_")) return "driver";
   if (type.startsWith("truck_")) return "truck";
   if (type.startsWith("load_")) return "load";
+  if (type.startsWith("company_")) return "company";
   return null;
 }
 
@@ -117,12 +135,15 @@ export function UploadDocumentDialog({
     if (ownerKind === "driver") return DRIVER_TYPES;
     if (ownerKind === "truck") return TRUCK_TYPES;
     if (ownerKind === "load") return LOAD_TYPES;
+    if (ownerKind === "company") return COMPANY_TYPES;
     return ALL_TYPES;
   }, [ownerKind]);
 
   const requiresExpiration = type ? EXPIRABLE.has(type) : false;
-  const needsEntityPicker = !!ownerKind && !lockedOwnerId;
-  const ownerId = lockedOwnerId ?? pickedOwnerId;
+  const needsEntityPicker =
+    !!ownerKind && ownerKind !== "company" && !lockedOwnerId;
+  const ownerId =
+    ownerKind === "company" ? null : (lockedOwnerId ?? pickedOwnerId);
 
   // Fetch the entity options only when the picker is needed and the dialog is open.
   const driversQuery = useQuery({
@@ -184,6 +205,23 @@ export function UploadDocumentDialog({
     (ownerKind === "truck" && trucksQuery.isLoading) ||
     (ownerKind === "load" && loadsQuery.isLoading);
 
+  const noEntitiesAvailable =
+    needsEntityPicker && !entityLoading && entityOptions.length === 0;
+
+  const createRoute =
+    ownerKind === "driver"
+      ? "/admin/drivers"
+      : ownerKind === "truck"
+        ? "/admin/trucks"
+        : "/admin/loads/new";
+
+  const createLabel =
+    ownerKind === "driver"
+      ? "Invite a driver"
+      : ownerKind === "truck"
+        ? "Add a truck"
+        : "Create a load";
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (submitting) return;
@@ -208,7 +246,7 @@ export function UploadDocumentDialog({
       );
       return;
     }
-    if (!ownerId) {
+    if (resolvedKind !== "company" && !ownerId) {
       setError(
         "This dialog needs an owner — open it from a driver, truck, or load detail page.",
       );
@@ -225,7 +263,7 @@ export function UploadDocumentDialog({
       const { token, pathname } = await requestUploadTokenFn({
         data: {
           ownerKind: resolvedKind,
-          ownerId,
+          ownerId: ownerId ?? null,
           type,
           fileName: file.name,
           mimeType: file.type,
@@ -245,7 +283,7 @@ export function UploadDocumentDialog({
       await onSubmit({
         blobKey: result.url,
         ownerKind: resolvedKind,
-        ownerId,
+        ownerId: ownerId ?? null,
         type: type as FinalizeDocumentPayload["type"],
         fileName: file.name,
         mimeType: file.type,
@@ -258,6 +296,37 @@ export function UploadDocumentDialog({
       setError(err instanceof Error ? err.message : "Upload failed.");
       setSubmitting(false);
     }
+  }
+
+  if (noEntitiesAvailable) {
+    return (
+      <FormDialog
+        open={open}
+        onOpenChange={onOpenChange}
+        title={`No ${ownerKind}s yet`}
+        description={`Documents have to attach to a ${ownerKind}. Create one first, then come back to upload.`}
+        icon={<Upload className="size-5" />}
+        submitLabel="Got it"
+        footer={
+          <>
+            <Link
+              to={createRoute}
+              onClick={() => onOpenChange(false)}
+              className="inline-flex h-9 items-center justify-center rounded-md bg-[var(--primary)] px-4 text-[13px] font-semibold text-[var(--primary-foreground)] shadow-[var(--shadow-sm)] hover:opacity-90"
+            >
+              {createLabel}
+            </Link>
+          </>
+        }
+      >
+        <p className="text-[13px] text-[var(--muted-foreground)]">
+          Tip: every document in the library is tied to a driver, truck, or
+          load. If you want to store company-wide documents (MC authority, W-9,
+          etc.) that aren't tied to a single asset, let the team know — that's
+          a separate feature.
+        </p>
+      </FormDialog>
+    );
   }
 
   return (
@@ -289,7 +358,7 @@ export function UploadDocumentDialog({
           }
         >
           <Select value={pickedOwnerId} onValueChange={setPickedOwnerId}>
-            <SelectTrigger>
+            <SelectTrigger className="w-full">
               <SelectValue
                 placeholder={
                   entityLoading
@@ -299,11 +368,21 @@ export function UploadDocumentDialog({
               />
             </SelectTrigger>
             <SelectContent>
-              {entityOptions.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
+              {entityLoading ? (
+                <div className="px-2 py-2 text-sm text-[var(--muted-foreground)]">
+                  Loading…
+                </div>
+              ) : entityOptions.length === 0 ? (
+                <div className="px-2 py-2 text-sm text-[var(--muted-foreground)]">
+                  No {ownerKind}s yet.
+                </div>
+              ) : (
+                entityOptions.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))
+              )}
             </SelectContent>
           </Select>
         </FormField>
@@ -311,7 +390,7 @@ export function UploadDocumentDialog({
 
       <FormField label="Document type" required>
         <Select value={type} onValueChange={setType}>
-          <SelectTrigger>
+          <SelectTrigger className="w-full">
             <SelectValue placeholder="Select a type…" />
           </SelectTrigger>
           <SelectContent>
@@ -324,17 +403,20 @@ export function UploadDocumentDialog({
         </Select>
       </FormField>
 
-      <FormField label="File" required>
+      <FormField
+        label="File"
+        required
+        hint={
+          file
+            ? `${file.name} · ${(file.size / 1024 / 1024).toFixed(2)} MB`
+            : undefined
+        }
+      >
         <Input
           type="file"
           accept="application/pdf,image/jpeg,image/jpg,image/png,image/heic,image/heif,image/webp"
           onChange={(e) => setFile(e.target.files?.[0] ?? null)}
         />
-        {file && (
-          <p className="text-[12px] text-[var(--muted-foreground)] mt-1">
-            {file.name} · {(file.size / 1024 / 1024).toFixed(2)} MB
-          </p>
-        )}
       </FormField>
 
       <FormField

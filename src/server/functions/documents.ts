@@ -72,11 +72,17 @@ const DOC_TYPES = [
   "load_lumper_receipt",
   "load_scale_ticket",
   "load_other",
+  "company_mc_authority",
+  "company_operating_authority",
+  "company_w9",
+  "company_liability_insurance",
+  "company_cargo_insurance",
+  "company_other",
 ] as const;
 const DocTypeZ = z.enum(DOC_TYPES);
 type DocTypeValue = (typeof DOC_TYPES)[number];
 
-const OWNER_KINDS = ["driver", "truck", "load"] as const;
+const OWNER_KINDS = ["driver", "truck", "load", "company"] as const;
 const OwnerKindZ = z.enum(OWNER_KINDS);
 
 const EXPIRABLE_DOC_TYPES = new Set<DocTypeValue>([
@@ -85,15 +91,18 @@ const EXPIRABLE_DOC_TYPES = new Set<DocTypeValue>([
   "truck_registration",
   "truck_insurance",
   "truck_inspection",
+  "company_liability_insurance",
+  "company_cargo_insurance",
 ]);
 
 function ownerKindForDocType(type: DocTypeValue): DocOwnerKind {
   if (type.startsWith("driver_")) return "driver";
   if (type.startsWith("truck_")) return "truck";
-  return "load";
+  if (type.startsWith("load_")) return "load";
+  return "company";
 }
 
-function ownerIdColumnForKind(kind: DocOwnerKind) {
+function ownerIdColumnForKind(kind: Exclude<DocOwnerKind, "company">) {
   switch (kind) {
     case "driver":
       return documents.driverProfileId;
@@ -121,7 +130,11 @@ export const listDocuments = createServerFn({ method: "GET" })
   .inputValidator((data: unknown) => ListDocumentsInput.parse(data ?? {}))
   .handler(async ({ data }) => {
     const conditions = [];
-    if (data.ownerKind && data.ownerId) {
+    if (data.ownerKind === "company") {
+      conditions.push(isNull(documents.driverProfileId));
+      conditions.push(isNull(documents.truckId));
+      conditions.push(isNull(documents.loadId));
+    } else if (data.ownerKind && data.ownerId) {
       conditions.push(eq(ownerIdColumnForKind(data.ownerKind), data.ownerId));
     } else if (data.ownerKind) {
       conditions.push(isNotNull(ownerIdColumnForKind(data.ownerKind)));
@@ -384,10 +397,12 @@ export const replaceDocument = createServerFn({ method: "POST" })
       ? "driver"
       : existing.truckId
         ? "truck"
-        : "load";
+        : existing.loadId
+          ? "load"
+          : "company";
     const ownerId =
-      existing.driverProfileId ?? existing.truckId ?? existing.loadId;
-    if (!ownerId) {
+      existing.driverProfileId ?? existing.truckId ?? existing.loadId ?? null;
+    if (!ownerId && ownerKind !== "company") {
       throw new Error("Document has no owner — DB invariant violated");
     }
 
@@ -545,6 +560,7 @@ async function assertOwnerExists(
   kind: DocOwnerKind,
   id: string,
 ): Promise<void> {
+  if (kind === "company") return;
   if (kind === "driver") {
     const row = await db.query.driverProfiles.findFirst({
       where: and(eq(driverProfiles.id, id), isNull(driverProfiles.deletedAt)),
@@ -570,13 +586,17 @@ async function assertOwnerExists(
 
 function ownerColumnsFor(
   kind: DocOwnerKind,
-  id: string,
+  id: string | null,
 ): Pick<
   typeof documents.$inferInsert,
   "driverProfileId" | "truckId" | "loadId"
 > {
-  if (kind === "driver") return { driverProfileId: id, truckId: null, loadId: null };
-  if (kind === "truck") return { driverProfileId: null, truckId: id, loadId: null };
+  if (kind === "company")
+    return { driverProfileId: null, truckId: null, loadId: null };
+  if (kind === "driver")
+    return { driverProfileId: id, truckId: null, loadId: null };
+  if (kind === "truck")
+    return { driverProfileId: null, truckId: id, loadId: null };
   return { driverProfileId: null, truckId: null, loadId: id };
 }
 
@@ -609,6 +629,7 @@ const OWNER_KIND_PATH_MAP: Record<DocOwnerKind, string> = {
   driver: "drivers",
   truck: "trucks",
   load: "loads",
+  company: "company",
 };
 
 function extFor(fileName: string, mimeType: string): string {
@@ -618,14 +639,19 @@ function extFor(fileName: string, mimeType: string): string {
   return slash >= 0 ? mimeType.slice(slash + 1) : "bin";
 }
 
-const RequestUploadTokenInput = z.object({
-  ownerKind: OwnerKindZ,
-  ownerId: z.string().uuid(),
-  type: DocTypeZ,
-  fileName: z.string().min(1),
-  mimeType: z.string().min(1),
-  fileSizeBytes: z.number().int().positive(),
-});
+const RequestUploadTokenInput = z
+  .object({
+    ownerKind: OwnerKindZ,
+    ownerId: z.string().uuid().nullable(),
+    type: DocTypeZ,
+    fileName: z.string().min(1),
+    mimeType: z.string().min(1),
+    fileSizeBytes: z.number().int().positive(),
+  })
+  .refine(
+    (d) => (d.ownerKind === "company" ? true : !!d.ownerId),
+    { message: "ownerId is required unless ownerKind is 'company'" },
+  );
 
 /** Step 1: validate auth + owner, return a scoped Blob client token. */
 export const requestUploadTokenFn = createServerFn({ method: "POST" })
@@ -643,10 +669,15 @@ export const requestUploadTokenFn = createServerFn({ method: "POST" })
         `Document type ${data.type} cannot be assigned to a ${data.ownerKind}`,
       );
     }
-    await assertOwnerExists(data.ownerKind, data.ownerId);
+    if (data.ownerKind !== "company" && data.ownerId) {
+      await assertOwnerExists(data.ownerKind, data.ownerId);
+    }
 
     const ext = extFor(data.fileName, data.mimeType);
-    const pathname = `${OWNER_KIND_PATH_MAP[data.ownerKind]}/${data.ownerId}/${data.type}/${randomUUID()}.${ext}`;
+    const pathname =
+      data.ownerKind === "company"
+        ? `${OWNER_KIND_PATH_MAP[data.ownerKind]}/${data.type}/${randomUUID()}.${ext}`
+        : `${OWNER_KIND_PATH_MAP[data.ownerKind]}/${data.ownerId}/${data.type}/${randomUUID()}.${ext}`;
 
     const token = await generateClientTokenFromReadWriteToken({
       token: env.BLOB_READ_WRITE_TOKEN,
@@ -661,7 +692,8 @@ export const requestUploadTokenFn = createServerFn({ method: "POST" })
 export interface FinalizeDocumentPayload {
   blobKey: string;
   ownerKind: DocOwnerKind;
-  ownerId: string;
+  /** Required for driver/truck/load. Null for company-level docs. */
+  ownerId: string | null;
   type: DocTypeValue;
   fileName: string;
   mimeType: string;
@@ -670,17 +702,22 @@ export interface FinalizeDocumentPayload {
   notes: string | null;
 }
 
-const FinalizeDocumentInput = z.object({
-  blobKey: z.string().url(),
-  ownerKind: OwnerKindZ,
-  ownerId: z.string().uuid(),
-  type: DocTypeZ,
-  fileName: z.string().min(1),
-  mimeType: z.string().min(1),
-  fileSizeBytes: z.number().int().positive(),
-  expirationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
-  notes: z.string().nullable(),
-});
+const FinalizeDocumentInput = z
+  .object({
+    blobKey: z.string().url(),
+    ownerKind: OwnerKindZ,
+    ownerId: z.string().uuid().nullable(),
+    type: DocTypeZ,
+    fileName: z.string().min(1),
+    mimeType: z.string().min(1),
+    fileSizeBytes: z.number().int().positive(),
+    expirationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).nullable(),
+    notes: z.string().nullable(),
+  })
+  .refine(
+    (d) => (d.ownerKind === "company" ? true : !!d.ownerId),
+    { message: "ownerId is required unless ownerKind is 'company'" },
+  );
 
 /** Step 3: verify blob landed, write DB record and audit entry. */
 export const finalizeDocumentUploadFn = createServerFn({ method: "POST" })

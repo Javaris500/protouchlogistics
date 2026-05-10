@@ -59,6 +59,13 @@ export const documentType = pgEnum("document_type", [
   "load_lumper_receipt",
   "load_scale_ticket",
   "load_other",
+  // Company-level documents — not tied to a driver/truck/load.
+  "company_mc_authority",
+  "company_operating_authority",
+  "company_w9",
+  "company_liability_insurance",
+  "company_cargo_insurance",
+  "company_other",
 ]);
 
 export const invoiceStatus = pgEnum("invoice_status", [

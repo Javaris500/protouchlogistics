@@ -22,12 +22,13 @@ import { env } from "@/server/env";
  * derived via `new URL(blobKey).pathname`.
  */
 
-export type DocOwnerKind = "driver" | "truck" | "load";
+export type DocOwnerKind = "driver" | "truck" | "load" | "company";
 
 const OWNER_KIND_PATH: Record<DocOwnerKind, string> = {
   driver: "drivers",
   truck: "trucks",
   load: "loads",
+  company: "company",
 };
 
 const MAX_FILE_BYTES = 25 * 1024 * 1024; // 25 MB; matches 02-DATA-MODEL §6.
@@ -44,7 +45,8 @@ const ALLOWED_MIME_TYPES = new Set([
 
 export interface UploadDocInput {
   ownerKind: DocOwnerKind;
-  ownerId: string;
+  /** Required for driver/truck/load. Null for company-level docs. */
+  ownerId: string | null;
   /**
    * Document type (e.g. `driver_cdl`, `load_bol`). Lives in the
    * `document_type` enum — but the storage helper does not enforce a
@@ -89,7 +91,10 @@ export async function uploadDoc(
   }
 
   const ext = extensionFor(input.fileName, input.mimeType);
-  const pathname = `${OWNER_KIND_PATH[input.ownerKind]}/${input.ownerId}/${input.type}/${randomUUID()}.${ext}`;
+  const pathname =
+    input.ownerKind === "company"
+      ? `${OWNER_KIND_PATH[input.ownerKind]}/${input.type}/${randomUUID()}.${ext}`
+      : `${OWNER_KIND_PATH[input.ownerKind]}/${input.ownerId}/${input.type}/${randomUUID()}.${ext}`;
 
   const result = await put(pathname, input.file, {
     access: "private",

@@ -48,14 +48,20 @@ const DOC_TYPE_LABEL: Record<string, string> = {
   load_lumper_receipt: "Lumper",
   load_scale_ticket: "Scale ticket",
   load_other: "Other (load)",
+  company_mc_authority: "MC authority",
+  company_operating_authority: "DOT authority",
+  company_w9: "W-9",
+  company_liability_insurance: "Liability ins.",
+  company_cargo_insurance: "Cargo ins.",
+  company_other: "Other (company)",
 };
 
 function DocumentsPage() {
   const queryClient = useQueryClient();
   const [uploadOpen, setUploadOpen] = React.useState(false);
-  const [ownerKind, setOwnerKind] = React.useState<"driver" | "truck" | "load">(
-    "driver",
-  );
+  const [ownerKind, setOwnerKind] = React.useState<
+    "driver" | "truck" | "load" | "company"
+  >("driver");
   const [ownerId, setOwnerId] = React.useState("");
 
   const docsQuery = useQuery({
@@ -133,7 +139,7 @@ function DocumentsPage() {
     }
   }
 
-  function openUploadFor(kind: "driver" | "truck" | "load") {
+  function openUploadFor(kind: "driver" | "truck" | "load" | "company") {
     setOwnerKind(kind);
     // No ownerId — UploadDocumentDialog renders an entity picker scoped to the
     // chosen kind so Gary picks by name (e.g. "Unit 101 — 2022 Cascadia") instead
@@ -169,12 +175,20 @@ function DocumentsPage() {
                 Truck doc
               </Button>
               <Button
-                variant="primary"
+                variant="ghost"
                 size="md"
                 onClick={() => openUploadFor("load")}
               >
                 <Upload className="size-4" />
                 Load doc
+              </Button>
+              <Button
+                variant="primary"
+                size="md"
+                onClick={() => openUploadFor("company")}
+              >
+                <Upload className="size-4" />
+                Company doc
               </Button>
             </div>
           }
@@ -275,7 +289,9 @@ function DocumentsPage() {
                           {owner?.kind} →
                         </Link>
                       ) : (
-                        <span className="text-[var(--muted-foreground)]">—</span>
+                        <span className="text-[var(--muted-foreground)]">
+                          Company
+                        </span>
                       )}
                       <span>
                         {d.expirationDate ? (
