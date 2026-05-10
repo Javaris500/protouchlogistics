@@ -287,6 +287,7 @@ function NewLoadPage() {
     bolNumber: string | null;
     driverPayCents: number | null;
     stops: ServerStop[];
+    assignedTruckId?: string | null;
   };
   const createMutation = useMutation({
     mutationFn: (input: CreateLoadInput) => createLoad({ data: input }),
@@ -339,6 +340,12 @@ function NewLoadPage() {
         bolNumber: form.bolNumber.trim() || null,
         driverPayCents: payCents,
         stops,
+        // Persist a truck-only assignment up-front. When a driver is also
+        // picked, assignLoad below sets both atomically with status=assigned;
+        // here we just attach the truck so it survives even without a driver.
+        assignedTruckId: form.assignedDriverId
+          ? null
+          : form.assignedTruckId || null,
       });
 
       if (form.assignedDriverId) {
@@ -622,7 +629,9 @@ function NewLoadPage() {
               selectedDriver?.assignedTruck &&
               form.assignedTruckId === selectedDriver.assignedTruck.id
                 ? `Auto-suggested from driver's default truck`
-                : "Select truck for this load"
+                : activeTrucks.length === 0
+                  ? "No active trucks — add one in /admin/trucks"
+                  : "Optional — pick a truck for this load"
             }
           >
             <Select
@@ -630,16 +639,9 @@ function NewLoadPage() {
               onValueChange={(v) =>
                 set("assignedTruckId", v === "__none__" ? "" : v)
               }
-              disabled={!form.assignedDriverId}
             >
-              <SelectTrigger>
-                <SelectValue
-                  placeholder={
-                    form.assignedDriverId
-                      ? "Pick a truck"
-                      : "Assign a driver first"
-                  }
-                />
+              <SelectTrigger className="w-full">
+                <SelectValue placeholder="Pick a truck (optional)" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none__">
